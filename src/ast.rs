@@ -40,7 +40,7 @@ pub enum FuncType {
 impl ToKoopa for FuncType {
     fn to_koopa(&self) -> String {
         match *self {
-            FuncType::Int => String::from("i32")
+            FuncType::Int => String::from("i32"),
         }
     }
 }

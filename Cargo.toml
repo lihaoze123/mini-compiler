@@ -4,7 +4,10 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+anyhow = "1.0.102"
+koopa = "0.0.10"
 lalrpop-util = "0.23.1"
+thiserror = "2.0.18"
 
 [build-dependencies]
 lalrpop = "0.23.1"
