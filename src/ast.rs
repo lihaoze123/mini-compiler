@@ -1,18 +1,10 @@
-use std::fmt::Write;
+use std::fmt::Display;
 
-pub trait ToKoopa {
-    fn to_koopa(&self) -> String;
-}
+use crate::ast::FuncType::Int;
 
 #[derive(Debug)]
 pub struct CompUnit {
     pub func_def: FuncDef,
-}
-
-impl ToKoopa for CompUnit {
-    fn to_koopa(&self) -> String {
-        self.func_def.to_koopa()
-    }
 }
 
 #[derive(Debug)]
@@ -22,26 +14,20 @@ pub struct FuncDef {
     pub block: Block,
 }
 
-impl ToKoopa for FuncDef {
-    fn to_koopa(&self) -> String {
-        let mut res: String = String::new();
-        let _ = writeln!(res, "fun @{}(): {} {{", self.id, self.func_type.to_koopa());
-        let _ = writeln!(res, "{}", self.block.to_koopa());
-        let _ = writeln!(res, "}}");
-        res
-    }
-}
-
 #[derive(Debug)]
 pub enum FuncType {
     Int,
 }
 
-impl ToKoopa for FuncType {
-    fn to_koopa(&self) -> String {
-        match *self {
-            FuncType::Int => String::from("i32"),
-        }
+impl Display for FuncType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "{}",
+            match self {
+                Int => "i32",
+            }
+        )
     }
 }
 
@@ -50,21 +36,40 @@ pub struct Block {
     pub stmt: Stmt,
 }
 
-impl ToKoopa for Block {
-    fn to_koopa(&self) -> String {
-        format!("%entry:\n{}", self.stmt.to_koopa())
-    }
+#[derive(Debug)]
+pub struct Stmt {
+    pub exp: Exp,
 }
 
 #[derive(Debug)]
-pub struct Stmt {
-    pub num: i32,
+pub struct Exp {
+    pub unary_exp: UnaryExp,
 }
 
-impl ToKoopa for Stmt {
-    fn to_koopa(&self) -> String {
-        format!("ret {}", self.num)
-    }
+#[derive(Debug)]
+pub enum UnaryExp {
+    PrimaryExp(PrimaryExp),
+    UnaryOp(UnaryOp, Box<UnaryExp>),
 }
+
+#[derive(Debug)]
+pub enum PrimaryExp {
+    Exp(Box<Exp>),
+    Number(Number),
+}
+
+#[derive(Debug)]
+pub struct Number {
+    pub value: IntConst,
+}
+
+#[derive(Debug)]
+pub enum UnaryOp {
+    Plus,
+    Minus,
+    Not,
+}
+
+pub type IntConst = i32;
 
 pub type Ident = String;
