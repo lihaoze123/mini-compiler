@@ -29,6 +29,21 @@ impl IRBuilder {
         res
     }
 
+    fn emit_binary(
+        &mut self,
+        op: impl std::fmt::Display,
+        lhs: impl std::fmt::Display,
+        rhs: impl std::fmt::Display,
+    ) -> Result<String, IRBuilderErr> {
+        let temp = self.new_temp();
+        writeln!(self.output, "{temp} = {op} {lhs}, {rhs}")?;
+        Ok(temp)
+    }
+
+    fn boolify(&mut self, value: String) -> Result<String, IRBuilderErr> {
+        self.emit_binary("ne", "0", value)
+    }
+
     pub fn gen_comp_unit(&mut self, comp_unit: &CompUnit) -> Result<String, IRBuilderErr> {
         self.output.clear();
         self.gen_func_def(&comp_unit.func_def)?;
@@ -71,11 +86,9 @@ impl IRBuilder {
             LOrExp::LOrOp(l_or_exp, l_and_exp) => {
                 let lhs = self.gen_l_or_exp(l_or_exp)?;
                 let rhs = self.gen_l_and_exp(l_and_exp)?;
-                let temp_id_1 = self.new_temp();
-                writeln!(self.output, "{temp_id_1} = or {lhs}, {rhs}")?;
-                let temp_id_2 = self.new_temp();
-                writeln!(self.output, "{temp_id_2} = eq 0, {rhs}")?;
-                Ok(temp_id_2)
+                let lhs = self.boolify(lhs)?;
+                let rhs = self.boolify(rhs)?;
+                self.emit_binary("or", lhs, rhs)
             }
         }
     }
@@ -86,11 +99,9 @@ impl IRBuilder {
             LAndExp::LAndOp(l_and_exp, eq_exp) => {
                 let lhs = self.gen_l_and_exp(l_and_exp)?;
                 let rhs = self.gen_eq_exp(eq_exp)?;
-                let temp_id_1 = self.new_temp();
-                writeln!(self.output, "{temp_id_1} = or {lhs}, {rhs}")?;
-                let temp_id_2 = self.new_temp();
-                writeln!(self.output, "{temp_id_2} = ne 0, {rhs}")?;
-                Ok(temp_id_2)
+                let lhs = self.boolify(lhs)?;
+                let rhs = self.boolify(rhs)?;
+                self.emit_binary("and", lhs, rhs)
             }
         }
     }
@@ -101,9 +112,7 @@ impl IRBuilder {
             EqExp::EqOp(eq_exp, eq_op, rel_exp) => {
                 let lhs = self.gen_eq_exp(eq_exp)?;
                 let rhs = self.gen_rel_exp(rel_exp)?;
-                let temp_id = self.new_temp();
-                writeln!(self.output, "{temp_id} = {eq_op} {lhs}, {rhs}")?;
-                Ok(temp_id)
+                self.emit_binary(eq_op, lhs, rhs)
             }
         }
     }
@@ -114,9 +123,7 @@ impl IRBuilder {
             RelExp::RelOp(rel_exp, rel_op, add_exp) => {
                 let lhs = self.gen_rel_exp(rel_exp)?;
                 let rhs = self.gen_add_exp(add_exp)?;
-                let temp_id = self.new_temp();
-                writeln!(self.output, "{temp_id} = {rel_op} {lhs}, {rhs}")?;
-                Ok(temp_id)
+                self.emit_binary(rel_op, lhs, rhs)
             }
         }
     }
@@ -127,9 +134,7 @@ impl IRBuilder {
             AddExp::AddOp(add_exp, add_op, mul_exp) => {
                 let lhs = self.gen_add_exp(add_exp)?;
                 let rhs = self.gen_mul_exp(mul_exp)?;
-                let temp_id = self.new_temp();
-                writeln!(self.output, "{temp_id} = {add_op} {lhs}, {rhs}")?;
-                Ok(temp_id)
+                self.emit_binary(add_op, lhs, rhs)
             }
         }
     }
@@ -140,9 +145,7 @@ impl IRBuilder {
             MulExp::MulOp(mul_exp, mul_op, unary_exp) => {
                 let lhs = self.gen_mul_exp(mul_exp)?;
                 let rhs = self.gen_unary_exp(unary_exp)?;
-                let temp_id = self.new_temp();
-                writeln!(self.output, "{temp_id} = {mul_op} {lhs}, {rhs}")?;
-                Ok(temp_id)
+                self.emit_binary(mul_op, lhs, rhs)
             }
         }
     }
