@@ -1,7 +1,3 @@
-use std::fmt::{self, Display};
-
-use crate::ast::FuncType::Int;
-
 #[derive(Debug)]
 pub struct CompUnit {
     pub func_def: FuncDef,
@@ -14,21 +10,10 @@ pub struct FuncDef {
     pub block: Block,
 }
 
-#[derive(Debug)]
+#[derive(Debug, derive_more::Display)]
 pub enum FuncType {
+    #[display("i32")]
     Int,
-}
-
-impl Display for FuncType {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(
-            f,
-            "{}",
-            match self {
-                Int => "i32",
-            }
-        )
-    }
 }
 
 #[derive(Debug)]
@@ -43,7 +28,7 @@ pub struct Stmt {
 
 #[derive(Debug)]
 pub struct Exp {
-    pub add_exp: AddExp,
+    pub l_or_exp: LOrExp,
 }
 
 #[derive(Debug)]
@@ -75,36 +60,66 @@ pub struct Number {
     pub value: IntConst,
 }
 
-#[derive(Debug)]
+#[derive(Debug, derive_more::Display)]
 pub enum MulOp {
+    #[display("mul")]
     Mul,
+    #[display("div")]
     Div,
+    #[display("mod")]
     Mod,
 }
 
-impl fmt::Display for MulOp {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", match self {
-            MulOp::Mul => "mul",
-            MulOp::Div => "div",
-            MulOp::Mod => "mod",
-        })
-    }
-}
-
-#[derive(Debug)]
+#[derive(Debug, derive_more::Display)]
 pub enum AddOp {
+    #[display("add")]
     Add,
+    #[display("sub")]
     Sub,
 }
 
-impl fmt::Display for AddOp {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", match self {
-            AddOp::Add => "add",
-            AddOp::Sub => "sub",
-        })
-    }
+#[derive(Debug)]
+pub enum RelExp {
+    AddExp(AddExp),
+    RelOp(Box<RelExp>, RelOp, AddExp),
+}
+
+#[derive(Debug, derive_more::Display)]
+pub enum RelOp {
+    #[display("lt")]
+    Lt,
+    #[display("gt")]
+    Gt,
+    #[display("le")]
+    Le,
+    #[display("ge")]
+    Ge,
+}
+
+#[derive(Debug)]
+pub enum EqExp {
+    RelExp(RelExp),
+    EqOp(Box<EqExp>, EqOp, RelExp),
+}
+
+#[derive(Debug, derive_more::Display)]
+pub enum EqOp {
+    #[display("eq")]
+    Eq,
+    #[display("ne")]
+    Ne,
+}
+
+#[derive(Debug)]
+pub enum LAndExp {
+    EqExp(EqExp),
+    LAndOp(Box<LAndExp>, EqExp),
+}
+
+#[derive(Debug)]
+pub enum LOrExp {
+    LAndExp(LAndExp),
+    LOrOp(Box<LOrExp>, LAndExp),
 }
 
 #[derive(Debug)]

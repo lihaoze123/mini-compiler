@@ -2,7 +2,8 @@ use std::fmt::Write;
 use thiserror::Error;
 
 use crate::ast::{
-    AddExp, Block, CompUnit, Exp, FuncDef, MulExp, PrimaryExp, Stmt, UnaryExp, UnaryOp,
+    AddExp, Block, CompUnit, EqExp, Exp, FuncDef, LAndExp, LOrExp, MulExp, PrimaryExp, RelExp,
+    Stmt, UnaryExp, UnaryOp,
 };
 
 #[derive(Error, Debug)]
@@ -61,7 +62,59 @@ impl IRBuilder {
     }
 
     fn gen_exp(&mut self, exp: &Exp) -> Result<String, IRBuilderErr> {
-        self.gen_add_exp(&exp.add_exp)
+        self.gen_l_or_exp(&exp.l_or_exp)
+    }
+
+    fn gen_l_or_exp(&mut self, l_or_exp: &LOrExp) -> Result<String, IRBuilderErr> {
+        match l_or_exp {
+            LOrExp::LAndExp(l_and_exp) => self.gen_l_and_exp(l_and_exp),
+            LOrExp::LOrOp(l_or_exp, l_and_exp) => {
+                let lhs = self.gen_l_or_exp(l_or_exp)?;
+                let rhs = self.gen_l_and_exp(l_and_exp)?;
+                let temp_id = self.new_temp();
+                writeln!(self.output, "{temp_id} = or {lhs} {rhs}")?;
+                Ok(temp_id)
+            }
+        }
+    }
+
+    fn gen_l_and_exp(&mut self, l_and_exp: &LAndExp) -> Result<String, IRBuilderErr> {
+        match l_and_exp {
+            LAndExp::EqExp(eq_exp) => self.gen_eq_exp(eq_exp),
+            LAndExp::LAndOp(l_and_exp, eq_exp) => {
+                let lhs = self.gen_l_and_exp(l_and_exp)?;
+                let rhs = self.gen_eq_exp(eq_exp)?;
+                let temp_id = self.new_temp();
+                writeln!(self.output, "{temp_id} = and {lhs} {rhs}")?;
+                Ok(temp_id)
+            }
+        }
+    }
+
+    fn gen_eq_exp(&mut self, eq_exp: &EqExp) -> Result<String, IRBuilderErr> {
+        match eq_exp {
+            EqExp::RelExp(rel_exp) => self.gen_rel_exp(rel_exp),
+            EqExp::EqOp(eq_exp, eq_op, rel_exp) => {
+                let lhs = self.gen_eq_exp(eq_exp)?;
+                let rhs = self.gen_rel_exp(rel_exp)?;
+                let temp_id = self.new_temp();
+                writeln!(self.output, "{temp_id} = {eq_op} {lhs}, {rhs}")?;
+                Ok(temp_id)
+            }
+        }
+    }
+
+    fn gen_rel_exp(&mut self, rel_exp: &RelExp) -> Result<String, IRBuilderErr> {
+        match rel_exp {
+            RelExp::AddExp(add_exp) => self.gen_add_exp(add_exp),
+            RelExp::RelOp(rel_exp, rel_op, add_exp) => {
+                let lhs = self.gen_rel_exp(rel_exp)?;
+                let rhs = self.gen_add_exp(add_exp)?;
+                let temp_id = self.new_temp();
+                writeln!(self.output, "{temp_id} = {rel_op} {lhs}, {rhs}")?;
+                Ok(temp_id)
+            }
+        }
     }
 
     fn gen_add_exp(&mut self, add_exp: &AddExp) -> Result<String, IRBuilderErr> {
@@ -73,7 +126,7 @@ impl IRBuilder {
                 let temp_id = self.new_temp();
                 writeln!(self.output, "{temp_id} = {add_op} {lhs}, {rhs}")?;
                 Ok(temp_id)
-            },
+            }
         }
     }
 
