@@ -117,17 +117,31 @@ impl AsmBuilder {
 
                 match op {
                     BinaryOp::Eq => {
-                        writeln!(self.output, "\txor {}, {}, {}", dst, lhs, rhs)?;
-                        writeln!(self.output, "\tseqz {}, {}", dst, dst)?;
+                        writeln!(self.output, "\txor {dst}, {lhs}, {rhs}")?;
+                        writeln!(self.output, "\tseqz {dst}, {dst}")?;
                     }
                     BinaryOp::Sub => {
-                        writeln!(self.output, "\tsub {}, {}, {}", dst, lhs, rhs)?;
+                        writeln!(self.output, "\tsub {dst}, {lhs}, {rhs}")?;
                     }
                     BinaryOp::Mul => {
-                        writeln!(self.output, "\tmul {}, {}, {}", dst, lhs, rhs)?;
+                        writeln!(self.output, "\tmul {dst}, {lhs}, {rhs}")?;
                     }
                     BinaryOp::Add => {
-                        writeln!(self.output, "\tadd {}, {}, {}", dst, lhs, rhs)?;
+                        writeln!(self.output, "\tadd {dst}, {lhs}, {rhs}")?;
+                    }
+                    BinaryOp::Lt => {
+                        writeln!(self.output, "\tslt {dst}, {lhs}, {rhs}")?;
+                    }
+                    BinaryOp::Gt => {
+                        writeln!(self.output, "\tslt {dst}, {rhs}, {lhs}")?;
+                    }
+                    BinaryOp::Le => {
+                        writeln!(self.output, "\tslt {dst}, {rhs}, {lhs}")?;
+                        writeln!(self.output, "\tseqz {dst}, {dst}")?;
+                    }
+                    BinaryOp::Ge => {
+                        writeln!(self.output, "\tslt {dst}, {lhs}, {rhs}")?;
+                        writeln!(self.output, "\tseqz {dst}, {dst}")?;
                     }
                     _ => unimplemented!("{:?}", op)
                 }
