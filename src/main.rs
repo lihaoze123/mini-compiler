@@ -58,7 +58,7 @@ fn main() -> Result<()> {
     let res = match cli.mode {
         Mode::Koopa => {
             let mut ir_builder = IRBuilder::new();
-            
+
             ir_builder.gen_comp_unit(&ast)?
         }
         Mode::Riscv => {

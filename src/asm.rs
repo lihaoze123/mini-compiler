@@ -35,9 +35,20 @@ pub struct AsmBuilder {
     temps: HashMap<Value, String>,
 }
 
+macro_rules! asm {
+    ($builder:expr, $($arg:tt)*) => {
+        $builder.emit(format_args!($($arg)*))?
+    };
+}
+
 impl AsmBuilder {
     pub fn new() -> Self {
         Self::default()
+    }
+
+    fn emit(&mut self, args: std::fmt::Arguments<'_>) -> Result<(), GenerateAsmError> {
+        writeln!(self.output, "\t{}", args)?;
+        Ok(())
     }
 
     fn get_temp(&mut self, value: Value) -> String {
@@ -67,7 +78,7 @@ impl AsmBuilder {
                 if int.value() == 0 {
                     Ok("x0".to_owned())
                 } else {
-                    writeln!(self.output, "\tli {}, {}", reg, int.value())?;
+                    asm!(self, "li {}, {}", reg, int.value());
                     Ok(reg.to_string())
                 }
             }
@@ -91,8 +102,8 @@ impl AsmBuilder {
             .strip_prefix("@")
             .ok_or(GenerateAsmError::Parse)?;
 
-        writeln!(self.output, "\t.text")?;
-        writeln!(self.output, "\t.globl {}", name)?;
+        asm!(self, ".text");
+        asm!(self, ".globl {}", name);
         writeln!(self.output, "{}:", name)?;
 
         for (_bb, node) in func_data.layout().bbs() {
@@ -114,9 +125,9 @@ impl AsmBuilder {
                 let value = ret.value().ok_or(GenerateAsmError::Unknown)?;
                 let reg = self.load_value(value, "a0", func_data)?;
                 if reg != "a0" {
-                    writeln!(self.output, "\tmv a0, {}", reg)?;
+                    asm!(self, "mv a0, {}", reg);
                 }
-                writeln!(self.output, "\tret")?;
+                asm!(self, "ret");
             }
             ValueKind::Binary(bin) => {
                 let op = bin.op();
@@ -126,47 +137,47 @@ impl AsmBuilder {
 
                 match op {
                     BinaryOp::Eq => {
-                        writeln!(self.output, "\txor {dst}, {lhs}, {rhs}")?;
-                        writeln!(self.output, "\tseqz {dst}, {dst}")?;
+                        asm!(self, "xor {dst}, {lhs}, {rhs}");
+                        asm!(self, "seqz {dst}, {dst}");
                     }
                     BinaryOp::NotEq => {
-                        writeln!(self.output, "\txor {dst}, {lhs}, {rhs}")?;
-                        writeln!(self.output, "\tsnez {dst}, {dst}")?;
+                        asm!(self, "xor {dst}, {lhs}, {rhs}");
+                        asm!(self, "snez {dst}, {dst}");
                     }
                     BinaryOp::Add => {
-                        writeln!(self.output, "\tadd {dst}, {lhs}, {rhs}")?;
+                        asm!(self, "add {dst}, {lhs}, {rhs}");
                     }
                     BinaryOp::Sub => {
-                        writeln!(self.output, "\tsub {dst}, {lhs}, {rhs}")?;
+                        asm!(self, "sub {dst}, {lhs}, {rhs}");
                     }
                     BinaryOp::Mul => {
-                        writeln!(self.output, "\tmul {dst}, {lhs}, {rhs}")?;
+                        asm!(self, "mul {dst}, {lhs}, {rhs}");
                     }
                     BinaryOp::Div => {
-                        writeln!(self.output, "\tdiv {dst}, {lhs}, {rhs}")?;
+                        asm!(self, "div {dst}, {lhs}, {rhs}");
                     }
                     BinaryOp::Mod => {
-                        writeln!(self.output, "\trem {dst}, {lhs}, {rhs}")?;
+                        asm!(self, "rem {dst}, {lhs}, {rhs}");
                     }
                     BinaryOp::Lt => {
-                        writeln!(self.output, "\tslt {dst}, {lhs}, {rhs}")?;
+                        asm!(self, "slt {dst}, {lhs}, {rhs}");
                     }
                     BinaryOp::Gt => {
-                        writeln!(self.output, "\tslt {dst}, {rhs}, {lhs}")?;
+                        asm!(self, "slt {dst}, {rhs}, {lhs}");
                     }
                     BinaryOp::Le => {
-                        writeln!(self.output, "\tslt {dst}, {rhs}, {lhs}")?;
-                        writeln!(self.output, "\tseqz {dst}, {dst}")?;
+                        asm!(self, "slt {dst}, {rhs}, {lhs}");
+                        asm!(self, "seqz {dst}, {dst}");
                     }
                     BinaryOp::Ge => {
-                        writeln!(self.output, "\tslt {dst}, {lhs}, {rhs}")?;
-                        writeln!(self.output, "\tseqz {dst}, {dst}")?;
+                        asm!(self, "slt {dst}, {lhs}, {rhs}");
+                        asm!(self, "seqz {dst}, {dst}");
                     }
                     BinaryOp::And => {
-                        writeln!(self.output, "\tand {dst}, {lhs}, {rhs}")?;
+                        asm!(self, "and {dst}, {lhs}, {rhs}");
                     }
                     BinaryOp::Or => {
-                        writeln!(self.output, "\tor {dst}, {lhs}, {rhs}")?;
+                        asm!(self, "or {dst}, {lhs}, {rhs}");
                     }
                     _ => unimplemented!("{:?}", op),
                 }
