@@ -1,5 +1,5 @@
-use koopa::ir::{FunctionData, Program, ValueKind, entities::ValueData};
-use std::fmt::Write;
+use koopa::ir::{BinaryOp, FunctionData, Program, Value, ValueKind};
+use std::{collections::HashMap, fmt::Write};
 use thiserror::Error;
 
 pub fn str_to_program(s: &str) -> Result<Program, GenerateAsmError> {
@@ -28,14 +28,51 @@ pub enum GenerateAsmError {
     Unknown,
 }
 
-#[derive(Default)]
 pub struct AsmBuilder {
     output: String,
+    temp_id: usize,
+    temps: HashMap<Value, String>,
+}
+
+impl Default for AsmBuilder {
+    fn default() -> Self {
+        Self {
+            output: String::new(),
+            temp_id: 0,
+            temps: HashMap::new(),
+        }
+    }
 }
 
 impl AsmBuilder {
     pub fn new() -> Self {
         Self::default()
+    }
+
+    fn get_temp(&mut self, value: Value) -> String {
+        self.temps
+            .entry(value)
+            .or_insert_with(|| {
+                let res = format!("t{}", self.temp_id);
+                self.temp_id += 1;
+                res
+            })
+            .clone()
+    }
+
+    fn load_value(
+        &mut self,
+        value: Value,
+        reg: &str,
+        func_data: &FunctionData,
+    ) -> Result<String, GenerateAsmError> {
+        match func_data.dfg().value(value).kind() {
+            ValueKind::Integer(int) => {
+                writeln!(self.output, "\tli {}, {}", reg, int.value())?;
+                Ok(reg.to_string())
+            }
+            _ => Ok(self.get_temp(value)),
+        }
     }
 
     pub fn gen_program(&mut self, program: &Program) -> Result<String, GenerateAsmError> {
@@ -60,7 +97,7 @@ impl AsmBuilder {
 
         for (_bb, node) in func_data.layout().bbs() {
             for &inst in node.insts().keys() {
-                self.gen_value(func_data.dfg().value(inst), func_data)?;
+                self.gen_value(inst, func_data)?;
             }
         }
 
@@ -69,20 +106,34 @@ impl AsmBuilder {
 
     fn gen_value(
         &mut self,
-        value_data: &ValueData,
+        value: Value,
         func_data: &FunctionData,
     ) -> Result<(), GenerateAsmError> {
-        match value_data.kind() {
+        match func_data.dfg().value(value).kind() {
             ValueKind::Return(ret) => {
                 let value = ret.value().ok_or(GenerateAsmError::Unknown)?;
-                let value_data = func_data.dfg().value(value);
-                match value_data.kind() {
-                    ValueKind::Integer(int) => {
-                        writeln!(self.output, "\tli a0, {}", int.value())?;
-                    }
-                    _ => unimplemented!(),
+                let reg = self.load_value(value, "a0", func_data)?;
+                if reg != "a0" {
+                    writeln!(self.output, "\tmv a0, {}", reg)?;
                 }
                 writeln!(self.output, "\tret")?;
+            }
+            ValueKind::Binary(bin) => {
+                let op = bin.op();
+                let dst = self.get_temp(value);
+                let lhs = self.load_value(bin.lhs(), "t5", func_data)?;
+                let rhs = self.load_value(bin.rhs(), "t6", func_data)?;
+
+                match op {
+                    BinaryOp::Eq => {
+                        writeln!(self.output, "\txor {}, {}, {}", dst, lhs, rhs)?;
+                        writeln!(self.output, "\tseqz {}, {}", dst, dst)?;
+                    }
+                    BinaryOp::Sub => {
+                        writeln!(self.output, "\tsub {}, {}, {}", dst, lhs, rhs)?;
+                    }
+                    _ => unimplemented!("{:?}", bin),
+                }
             }
             kind => {
                 unimplemented!("{:?}", kind);
