@@ -1,4 +1,4 @@
-use std::fmt::Display;
+use std::fmt::{self, Display};
 
 use crate::ast::FuncType::Int;
 
@@ -43,7 +43,7 @@ pub struct Stmt {
 
 #[derive(Debug)]
 pub struct Exp {
-    pub unary_exp: UnaryExp,
+    pub add_exp: AddExp,
 }
 
 #[derive(Debug)]
@@ -59,8 +59,52 @@ pub enum PrimaryExp {
 }
 
 #[derive(Debug)]
+pub enum MulExp {
+    UnaryExp(UnaryExp),
+    MulOp(Box<MulExp>, MulOp, UnaryExp),
+}
+
+#[derive(Debug)]
+pub enum AddExp {
+    MulExp(MulExp),
+    AddOp(Box<AddExp>, AddOp, MulExp),
+}
+
+#[derive(Debug)]
 pub struct Number {
     pub value: IntConst,
+}
+
+#[derive(Debug)]
+pub enum MulOp {
+    Mul,
+    Div,
+    Mod,
+}
+
+impl fmt::Display for MulOp {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", match self {
+            MulOp::Mul => "mul",
+            MulOp::Div => "div",
+            MulOp::Mod => "mod",
+        })
+    }
+}
+
+#[derive(Debug)]
+pub enum AddOp {
+    Add,
+    Sub,
+}
+
+impl fmt::Display for AddOp {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", match self {
+            AddOp::Add => "add",
+            AddOp::Sub => "sub",
+        })
+    }
 }
 
 #[derive(Debug)]

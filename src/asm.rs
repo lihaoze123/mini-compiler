@@ -28,20 +28,11 @@ pub enum GenerateAsmError {
     Unknown,
 }
 
+#[derive(Default)]
 pub struct AsmBuilder {
     output: String,
     temp_id: usize,
     temps: HashMap<Value, String>,
-}
-
-impl Default for AsmBuilder {
-    fn default() -> Self {
-        Self {
-            output: String::new(),
-            temp_id: 0,
-            temps: HashMap::new(),
-        }
-    }
 }
 
 impl AsmBuilder {
@@ -132,7 +123,13 @@ impl AsmBuilder {
                     BinaryOp::Sub => {
                         writeln!(self.output, "\tsub {}, {}, {}", dst, lhs, rhs)?;
                     }
-                    _ => unimplemented!("{:?}", bin),
+                    BinaryOp::Mul => {
+                        writeln!(self.output, "\tmul {}, {}, {}", dst, lhs, rhs)?;
+                    }
+                    BinaryOp::Add => {
+                        writeln!(self.output, "\tadd {}, {}, {}", dst, lhs, rhs)?;
+                    }
+                    _ => unimplemented!("{:?}", op)
                 }
             }
             kind => {

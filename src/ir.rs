@@ -1,7 +1,9 @@
 use std::fmt::Write;
 use thiserror::Error;
 
-use crate::ast::{Block, CompUnit, Exp, FuncDef, PrimaryExp, Stmt, UnaryExp, UnaryOp};
+use crate::ast::{
+    AddExp, Block, CompUnit, Exp, FuncDef, MulExp, PrimaryExp, Stmt, UnaryExp, UnaryOp,
+};
 
 #[derive(Error, Debug)]
 pub enum IRBuilderErr {
@@ -59,7 +61,33 @@ impl IRBuilder {
     }
 
     fn gen_exp(&mut self, exp: &Exp) -> Result<String, IRBuilderErr> {
-        self.gen_unary_exp(&exp.unary_exp)
+        self.gen_add_exp(&exp.add_exp)
+    }
+
+    fn gen_add_exp(&mut self, add_exp: &AddExp) -> Result<String, IRBuilderErr> {
+        match add_exp {
+            AddExp::MulExp(mul_exp) => self.gen_mul_exp(mul_exp),
+            AddExp::AddOp(add_exp, add_op, mul_exp) => {
+                let lhs = self.gen_add_exp(add_exp)?;
+                let rhs = self.gen_mul_exp(mul_exp)?;
+                let temp_id = self.new_temp();
+                writeln!(self.output, "{temp_id} = {add_op} {lhs}, {rhs}")?;
+                Ok(temp_id)
+            },
+        }
+    }
+
+    fn gen_mul_exp(&mut self, mul_exp: &MulExp) -> Result<String, IRBuilderErr> {
+        match mul_exp {
+            MulExp::UnaryExp(unary_exp) => self.gen_unary_exp(unary_exp),
+            MulExp::MulOp(mul_exp, mul_op, unary_exp) => {
+                let lhs = self.gen_mul_exp(mul_exp)?;
+                let rhs = self.gen_unary_exp(unary_exp)?;
+                let temp_id = self.new_temp();
+                writeln!(self.output, "{temp_id} = {mul_op} {lhs}, {rhs}")?;
+                Ok(temp_id)
+            }
+        }
     }
 
     fn gen_unary_exp(&mut self, unary_exp: &UnaryExp) -> Result<String, IRBuilderErr> {
@@ -70,13 +98,13 @@ impl IRBuilder {
                 let temp_id = self.new_temp();
                 match unary_op {
                     UnaryOp::Minus => {
-                        writeln!(self.output, "{} = sub 0, {}", temp_id, value)?;
+                        writeln!(self.output, "{temp_id} = sub 0, {value}")?;
                     }
                     UnaryOp::Plus => {
                         return Ok(value);
                     }
                     UnaryOp::Not => {
-                        writeln!(self.output, "{} = eq 0, {}", temp_id, value)?;
+                        writeln!(self.output, "{temp_id} = eq 0, {value}")?;
                     }
                 }
                 Ok(temp_id)
