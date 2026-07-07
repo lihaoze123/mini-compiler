@@ -71,9 +71,11 @@ impl IRBuilder {
             LOrExp::LOrOp(l_or_exp, l_and_exp) => {
                 let lhs = self.gen_l_or_exp(l_or_exp)?;
                 let rhs = self.gen_l_and_exp(l_and_exp)?;
-                let temp_id = self.new_temp();
-                writeln!(self.output, "{temp_id} = or {lhs} {rhs}")?;
-                Ok(temp_id)
+                let temp_id_1 = self.new_temp();
+                writeln!(self.output, "{temp_id_1} = or {lhs}, {rhs}")?;
+                let temp_id_2 = self.new_temp();
+                writeln!(self.output, "{temp_id_2} = eq 0, {rhs}")?;
+                Ok(temp_id_2)
             }
         }
     }
@@ -84,9 +86,11 @@ impl IRBuilder {
             LAndExp::LAndOp(l_and_exp, eq_exp) => {
                 let lhs = self.gen_l_and_exp(l_and_exp)?;
                 let rhs = self.gen_eq_exp(eq_exp)?;
-                let temp_id = self.new_temp();
-                writeln!(self.output, "{temp_id} = and {lhs} {rhs}")?;
-                Ok(temp_id)
+                let temp_id_1 = self.new_temp();
+                writeln!(self.output, "{temp_id_1} = or {lhs}, {rhs}")?;
+                let temp_id_2 = self.new_temp();
+                writeln!(self.output, "{temp_id_2} = ne 0, {rhs}")?;
+                Ok(temp_id_2)
             }
         }
     }

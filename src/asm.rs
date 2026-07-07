@@ -44,7 +44,12 @@ impl AsmBuilder {
         self.temps
             .entry(value)
             .or_insert_with(|| {
-                let res = format!("t{}", self.temp_id);
+                let res = if self.temp_id <= 6 {
+                    format!("t{}", self.temp_id)
+                } else {
+                    // TODO 临时做法
+                    format!("a{}", self.temp_id - 6)
+                };
                 self.temp_id += 1;
                 res
             })
@@ -59,8 +64,12 @@ impl AsmBuilder {
     ) -> Result<String, GenerateAsmError> {
         match func_data.dfg().value(value).kind() {
             ValueKind::Integer(int) => {
-                writeln!(self.output, "\tli {}, {}", reg, int.value())?;
-                Ok(reg.to_string())
+                if int.value() == 0 {
+                    Ok("x0".to_owned())
+                } else {
+                    writeln!(self.output, "\tli {}, {}", reg, int.value())?;
+                    Ok(reg.to_string())
+                }
             }
             _ => Ok(self.get_temp(value)),
         }
@@ -120,14 +129,24 @@ impl AsmBuilder {
                         writeln!(self.output, "\txor {dst}, {lhs}, {rhs}")?;
                         writeln!(self.output, "\tseqz {dst}, {dst}")?;
                     }
+                    BinaryOp::NotEq => {
+                        writeln!(self.output, "\txor {dst}, {lhs}, {rhs}")?;
+                        writeln!(self.output, "\tsnez {dst}, {dst}")?;
+                    }
+                    BinaryOp::Add => {
+                        writeln!(self.output, "\tadd {dst}, {lhs}, {rhs}")?;
+                    }
                     BinaryOp::Sub => {
                         writeln!(self.output, "\tsub {dst}, {lhs}, {rhs}")?;
                     }
                     BinaryOp::Mul => {
                         writeln!(self.output, "\tmul {dst}, {lhs}, {rhs}")?;
                     }
-                    BinaryOp::Add => {
-                        writeln!(self.output, "\tadd {dst}, {lhs}, {rhs}")?;
+                    BinaryOp::Div => {
+                        writeln!(self.output, "\tdiv {dst}, {lhs}, {rhs}")?;
+                    }
+                    BinaryOp::Mod => {
+                        writeln!(self.output, "\trem {dst}, {lhs}, {rhs}")?;
                     }
                     BinaryOp::Lt => {
                         writeln!(self.output, "\tslt {dst}, {lhs}, {rhs}")?;
@@ -143,7 +162,13 @@ impl AsmBuilder {
                         writeln!(self.output, "\tslt {dst}, {lhs}, {rhs}")?;
                         writeln!(self.output, "\tseqz {dst}, {dst}")?;
                     }
-                    _ => unimplemented!("{:?}", op)
+                    BinaryOp::And => {
+                        writeln!(self.output, "\tand {dst}, {lhs}, {rhs}")?;
+                    }
+                    BinaryOp::Or => {
+                        writeln!(self.output, "\tor {dst}, {lhs}, {rhs}")?;
+                    }
+                    _ => unimplemented!("{:?}", op),
                 }
             }
             kind => {
