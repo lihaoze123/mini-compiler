@@ -19,7 +19,34 @@ FuncDef: FuncDef = {
 
 FuncType: FuncType = "int" => FuncType::Int;
 
-Block: Block = "{" <stmt: Stmt> "}" => Block { <> };
+Block: Block = "{" <items: BlockItem*> "}" => Block { <> };
+
+BlockItem: BlockItem = {
+  <decl: Decl> => BlockItem::Decl(decl),
+  <stmt: Stmt> => BlockItem::Stmt(stmt),
+};
+
+Decl: Decl = <const_decl: ConstDecl> => Decl { <> };
+
+ConstDecl: ConstDecl = "const" <b_type: BType> <const_defs: ConstDefs> ";" => ConstDecl { <> };
+
+ConstDefs: Vec<ConstDef> = {
+  <def: ConstDef> => vec![def],
+  <mut defs: ConstDefs> "," <def: ConstDef> => {
+    defs.push(def);
+    defs
+  },
+};
+
+BType: BType = "int" => BType::Int;
+
+ConstDef: ConstDef = <id: Ident> "=" <const_init_val: ConstInitVal> => ConstDef { <> };
+
+ConstInitVal: ConstInitVal = <const_exp: ConstExp> => ConstInitVal { <> };
+
+ConstExp: ConstExp = <exp: Exp> => ConstExp { <> };
+
+LVal: LVal = <id: Ident> => LVal { <> };
 
 Stmt: Stmt = "return" <exp: Exp> ";" => Stmt { <> };
 
@@ -36,7 +63,8 @@ UnaryExp: UnaryExp = {
 
 PrimaryExp: PrimaryExp = {
   "(" <exp: Exp> ")" => PrimaryExp::Exp(Box::new(exp)),
-  <num: Number> => PrimaryExp::Number(num)
+  <l_val: LVal> => PrimaryExp::LVal(l_val),
+  <num: Number> => PrimaryExp::Number(num),
 };
 
 MulExp: MulExp = {

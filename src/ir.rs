@@ -64,7 +64,7 @@ impl IRBuilder {
 
     fn gen_block(&mut self, block: &Block) -> Result<(), IRBuilderErr> {
         writeln!(self.output, "%entry:")?;
-        self.gen_stmt(&block.stmt)?;
+        // self.gen_stmt(&block.stmt)?;
 
         Ok(())
     }
