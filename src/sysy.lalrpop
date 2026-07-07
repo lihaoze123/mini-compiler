@@ -26,7 +26,7 @@ BlockItem: BlockItem = {
   <stmt: Stmt> => BlockItem::Stmt(stmt),
 };
 
-Decl: Decl = <const_decl: ConstDecl> => Decl { <> };
+Decl: Decl = <const_decl: ConstDecl> => Decl::ConstDecl(const_decl);
 
 ConstDecl: ConstDecl = "const" <b_type: BType> <const_defs: ConstDefs> ";" => ConstDecl { <> };
 

@@ -1,3 +1,4 @@
 int main() {
-    return 0 && 2;
+    const int x = 123 + 456;
+    return x;
 }

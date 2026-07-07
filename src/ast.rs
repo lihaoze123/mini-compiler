@@ -44,8 +44,8 @@ pub enum UnaryExp {
 }
 
 #[derive(Debug)]
-pub struct Decl {
-    pub const_decl: ConstDecl,
+pub enum Decl {
+    ConstDecl(ConstDecl),
 }
 
 #[derive(Debug)]
