@@ -44,11 +44,11 @@ impl AsmBuilder {
         self.temps
             .entry(value)
             .or_insert_with(|| {
-                let res = if self.temp_id <= 6 {
+                let res = if self.temp_id <= 4 {
                     format!("t{}", self.temp_id)
                 } else {
                     // TODO 临时做法
-                    format!("a{}", self.temp_id - 6)
+                    format!("a{}", self.temp_id - 4)
                 };
                 self.temp_id += 1;
                 res
