@@ -21,22 +21,26 @@ pub enum IRBuilderErr {
 
     #[error("赋值到常量符号 {0}")]
     AssignToConst(String),
-    
+
     #[error("重复定义符号 {0}")]
     DuplicateSymbol(String),
+
+    #[error("没有作用域")]
+    NoScope,
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 enum Symbol {
     Const(i32),
-    Var,
+    Var(String),
 }
 
 #[derive(Default)]
 pub struct IRBuilder {
     output: String,
     temp_id: usize,
-    symbols: HashMap<Ident, Symbol>,
+    var_id: usize,
+    symbols: Vec<HashMap<Ident, Symbol>>,
 }
 
 impl fmt::Display for Ident {
@@ -70,19 +74,22 @@ impl IRBuilder {
     fn boolify(&mut self, value: String) -> Result<String, IRBuilderErr> {
         self.emit_binary("ne", "0", value)
     }
+
     fn define_symbol(&mut self, id: &Ident, symbol: Symbol) -> Result<(), IRBuilderErr> {
-        if self.symbols.contains_key(id) {
+        let scope = self.symbols.last_mut().ok_or(IRBuilderErr::NoScope)?;
+        if scope.contains_key(id) {
             return Err(IRBuilderErr::DuplicateSymbol(id.to_string()));
         }
-        
-        self.symbols.insert(id.clone(), symbol);
+
+        scope.insert(id.clone(), symbol);
         Ok(())
     }
 
     fn get_symbol(&self, id: &Ident) -> Result<Symbol, IRBuilderErr> {
         self.symbols
-            .get(id)
-            .cloned()
+            .iter()
+            .rev()
+            .find_map(|scope| scope.get(id).cloned())
             .ok_or_else(|| IRBuilderErr::UndefinedSymbol(id.to_string()))
     }
 
@@ -100,6 +107,8 @@ impl IRBuilder {
             "fun {}(): {} {{",
             func_def.id, func_def.func_type
         )?;
+        writeln!(self.output, "%entry:")?;
+
         self.gen_block(&func_def.block)?;
         writeln!(self.output, "}}")?;
 
@@ -107,11 +116,13 @@ impl IRBuilder {
     }
 
     fn gen_block(&mut self, block: &Block) -> Result<(), IRBuilderErr> {
-        writeln!(self.output, "%entry:")?;
+        self.symbols.push(HashMap::new());
+
         for item in &block.items {
             self.gen_block_item(item)?;
         }
 
+        self.symbols.pop();
         Ok(())
     }
 
@@ -151,9 +162,14 @@ impl IRBuilder {
             Some(init_val) => self.gen_exp(&init_val.exp)?,
             None => "0".to_owned(),
         };
-        self.define_symbol(id, Symbol::Var)?;
-        writeln!(self.output, "{id} = alloc {b_type}")?;
-        writeln!(self.output, "store {value}, {id}")?;
+        
+        let name = format!("@{}_{}", id.id, self.var_id);
+        self.var_id += 1;
+
+        self.define_symbol(id, Symbol::Var(name.clone()))?;
+
+        writeln!(self.output, "{name} = alloc {b_type}")?;
+        writeln!(self.output, "store {value}, {name}")?;
         Ok(())
     }
 
@@ -178,6 +194,12 @@ impl IRBuilder {
         match stmt {
             Stmt::Return(ret) => self.gen_return(ret),
             Stmt::Assign(l_val, exp) => self.gen_assign(l_val, exp),
+            Stmt::Exp(Some(exp)) => {
+                self.gen_exp(exp)?;
+                Ok(())
+            }
+            Stmt::Exp(None) => Ok(()),
+            Stmt::Block(block) => self.gen_block(block),
         }
     }
 
@@ -190,9 +212,9 @@ impl IRBuilder {
     fn gen_assign(&mut self, l_val: &LVal, exp: &Exp) -> Result<(), IRBuilderErr> {
         match self.get_symbol(&l_val.id)? {
             Symbol::Const(_) => Err(IRBuilderErr::AssignToConst(l_val.id.to_string())),
-            Symbol::Var => {
+            Symbol::Var(name) => {
                 let value = self.gen_exp(exp)?;
-                writeln!(self.output, "store {value}, {}", l_val.id)?;
+                writeln!(self.output, "store {value}, {name}")?;
                 Ok(())
             }
         }
@@ -305,9 +327,9 @@ impl IRBuilder {
     fn gen_l_val(&mut self, id: &Ident) -> Result<String, IRBuilderErr> {
         match self.get_symbol(id)? {
             Symbol::Const(value) => Ok(value.to_string()),
-            Symbol::Var => {
+            Symbol::Var(name) => {
                 let temp = self.new_temp();
-                writeln!(self.output, "{temp} = load {id}")?;
+                writeln!(self.output, "{temp} = load {name}")?;
                 Ok(temp)
             }
         }
@@ -423,7 +445,7 @@ impl IRBuilder {
     fn eval_l_val(&self, id: &Ident) -> Result<i32, IRBuilderErr> {
         match self.get_symbol(id)? {
             Symbol::Const(value) => Ok(value),
-            Symbol::Var => Err(IRBuilderErr::NonConstSymbol(id.to_string())),
+            Symbol::Var(_) => Err(IRBuilderErr::NonConstSymbol(id.to_string())),
         }
     }
 }
