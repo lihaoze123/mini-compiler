@@ -1,5 +1,8 @@
 use koopa::ir::{BinaryOp, FunctionData, Program, Value, ValueKind};
-use std::{collections::HashMap, fmt::Write};
+use std::{
+    collections::HashMap,
+    fmt::{self, Write},
+};
 use thiserror::Error;
 
 pub fn str_to_program(s: &str) -> Result<Program, GenerateAsmError> {
@@ -24,6 +27,9 @@ pub enum GenerateAsmError {
     #[error("解析 Koopa IR 时错误: {0:?}")]
     KoopaParse(koopa::front::span::Error),
 
+    #[error("缺少栈槽")]
+    MissingStackSlot,
+
     #[error("未知错误")]
     Unknown,
 }
@@ -31,8 +37,64 @@ pub enum GenerateAsmError {
 #[derive(Default)]
 pub struct AsmBuilder {
     output: String,
-    temp_id: usize,
-    temps: HashMap<Value, usize>,
+}
+
+struct FuncCtx<'a> {
+    func_data: &'a FunctionData,
+    frame: StackFrame,
+}
+
+#[derive(Clone, Copy, derive_more::Display)]
+#[display("{offset}(sp)")]
+struct StackSlot {
+    offset: usize,
+}
+
+#[derive(Default)]
+struct StackFrame {
+    size: usize,
+    slots: HashMap<Value, StackSlot>,
+}
+
+impl StackFrame {
+    fn build(func_data: &FunctionData) -> Self {
+        let mut frame = Self::default();
+
+        for (_bb, node) in func_data.layout().bbs() {
+            for &inst in node.insts().keys() {
+                match func_data.dfg().value(inst).kind() {
+                    ValueKind::Alloc(_) | ValueKind::Binary(_) | ValueKind::Load(_) => {
+                        frame.alloc_slot(inst);
+                    }
+                    _ => {}
+                }
+            }
+        }
+
+        frame.size = Self::align_to_16(frame.size);
+        frame
+    }
+
+    fn alloc_slot(&mut self, value: Value) {
+        if self.slots.contains_key(&value) {
+            return;
+        }
+
+        let slot = StackSlot { offset: self.size };
+        self.size += 4;
+        self.slots.insert(value, slot);
+    }
+
+    fn slot(&self, value: Value) -> Result<StackSlot, GenerateAsmError> {
+        self.slots
+            .get(&value)
+            .copied()
+            .ok_or(GenerateAsmError::MissingStackSlot)
+    }
+
+    fn align_to_16(size: usize) -> usize {
+        (size + 15) / 16 * 16
+    }
 }
 
 macro_rules! asm {
@@ -46,64 +108,38 @@ impl AsmBuilder {
         Self::default()
     }
 
-    fn emit(&mut self, args: std::fmt::Arguments<'_>) -> Result<(), GenerateAsmError> {
+    fn emit(&mut self, args: fmt::Arguments<'_>) -> Result<(), GenerateAsmError> {
         writeln!(self.output, "\t{}", args)?;
         Ok(())
-    }
-
-    fn align_to_16(size: usize) -> usize {
-        (size + 15) / 16 * 16
-    }
-
-    fn get_temp(&mut self, value: Value) -> String {
-        let res = self.temps.entry(value).or_insert_with(|| {
-            let res = self.temp_id;
-            self.temp_id += 4;
-            res
-        });
-        format!("{res}(sp)")
     }
 
     fn load_to(
         &mut self,
         value: Value,
         reg: &str,
-        func_data: &FunctionData,
+        ctx: &FuncCtx<'_>,
     ) -> Result<(), GenerateAsmError> {
-        match func_data.dfg().value(value).kind() {
+        match ctx.func_data.dfg().value(value).kind() {
             ValueKind::Integer(int) => {
                 asm!(self, "li {reg}, {}", int.value());
             }
             _ => {
-                let slot = self.get_temp(value);
+                let slot = ctx.frame.slot(value)?;
                 asm!(self, "lw {reg}, {slot}");
             }
         }
         Ok(())
     }
 
-    fn store_from(&mut self, value: Value, reg: &str) -> Result<(), GenerateAsmError> {
-        let slot = self.get_temp(value);
+    fn store_from(
+        &mut self,
+        value: Value,
+        reg: &str,
+        ctx: &FuncCtx<'_>,
+    ) -> Result<(), GenerateAsmError> {
+        let slot = ctx.frame.slot(value)?;
         asm!(self, "sw {reg}, {slot}");
         Ok(())
-    }
-
-    fn prepare_stack_slots(&mut self, func_data: &FunctionData) -> usize {
-        self.temp_id = 0;
-        self.temps.clear();
-
-        for (_bb, node) in func_data.layout().bbs() {
-            for &inst in node.insts().keys() {
-                match func_data.dfg().value(inst).kind() {
-                    ValueKind::Alloc(_) | ValueKind::Binary(_) | ValueKind::Load(_) => {
-                        self.get_temp(inst);
-                    }
-                    _ => {}
-                }
-            }
-        }
-
-        Self::align_to_16(self.temp_id)
     }
 
     pub fn gen_program(&mut self, program: &Program) -> Result<String, GenerateAsmError> {
@@ -126,36 +162,36 @@ impl AsmBuilder {
         asm!(self, ".globl {}", name);
         writeln!(self.output, "{}:", name)?;
 
-        let s = self.prepare_stack_slots(func_data);
+        let ctx = FuncCtx {
+            func_data,
+            frame: StackFrame::build(func_data),
+        };
+        let s = ctx.frame.size;
         asm!(self, "addi sp, sp, -{s}");
 
         for (_bb, node) in func_data.layout().bbs() {
             for &inst in node.insts().keys() {
-                self.gen_value(inst, func_data, s)?;
+                self.gen_value(inst, &ctx)?;
             }
         }
 
         Ok(())
     }
 
-    fn gen_value(
-        &mut self,
-        value: Value,
-        func_data: &FunctionData,
-        s: usize,
-    ) -> Result<(), GenerateAsmError> {
-        let value_data = func_data.dfg().value(value);
+    fn gen_value(&mut self, value: Value, ctx: &FuncCtx<'_>) -> Result<(), GenerateAsmError> {
+        let value_data = ctx.func_data.dfg().value(value);
         match value_data.kind() {
             ValueKind::Return(ret) => {
                 let value = ret.value().ok_or(GenerateAsmError::Unknown)?;
-                self.load_to(value, "a0", func_data)?;
+                self.load_to(value, "a0", ctx)?;
+                let s = ctx.frame.size;
                 asm!(self, "addi sp, sp, {s}");
                 asm!(self, "ret");
             }
             ValueKind::Binary(bin) => {
                 let op = bin.op();
-                self.load_to(bin.lhs(), "t0", func_data)?;
-                self.load_to(bin.rhs(), "t1", func_data)?;
+                self.load_to(bin.lhs(), "t0", ctx)?;
+                self.load_to(bin.rhs(), "t1", ctx)?;
 
                 match op {
                     BinaryOp::Eq => {
@@ -214,20 +250,18 @@ impl AsmBuilder {
                         asm!(self, "sra t2, t0, t1");
                     }
                 }
-                self.store_from(value, "t2")?;
+                self.store_from(value, "t2", ctx)?;
             }
-            ValueKind::Alloc(_) => {
-                self.get_temp(value);
-            }
+            ValueKind::Alloc(_) => {}
             ValueKind::Store(store) => {
-                self.load_to(store.value(), "t0", func_data)?;
-                let dest = self.get_temp(store.dest());
+                self.load_to(store.value(), "t0", ctx)?;
+                let dest = ctx.frame.slot(store.dest())?;
                 asm!(self, "sw t0, {dest}");
             }
             ValueKind::Load(load) => {
-                let src = self.get_temp(load.src());
+                let src = ctx.frame.slot(load.src())?;
                 asm!(self, "lw t0, {src}");
-                self.store_from(value, "t0")?;
+                self.store_from(value, "t0", ctx)?;
             }
             kind => {
                 unimplemented!("{:?}", kind);
