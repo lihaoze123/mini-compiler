@@ -1,4 +1,3 @@
-use std::fmt::Display;
 
 #[derive(Debug)]
 pub struct CompUnit {
@@ -90,20 +89,6 @@ pub enum VarDef {
 #[derive(Debug)]
 pub struct InitVal {
     pub exp: Exp,
-}
-
-impl Default for InitVal {
-    fn default() -> Self {
-        Self {
-            exp: Exp {
-                l_or_exp: LOrExp::LAndExp(LAndExp::EqExp(EqExp::RelExp(RelExp::AddExp(
-                    AddExp::MulExp(MulExp::UnaryExp(UnaryExp::PrimaryExp(PrimaryExp::Number(
-                        Number { value: 0 },
-                    )))),
-                )))),
-            },
-        }
-    }
 }
 
 #[derive(Debug)]
