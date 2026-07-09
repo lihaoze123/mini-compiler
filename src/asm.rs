@@ -32,7 +32,7 @@ pub enum GenerateAsmError {
 pub struct AsmBuilder {
     output: String,
     temp_id: usize,
-    temps: HashMap<Value, String>,
+    temps: HashMap<Value, usize>,
 }
 
 macro_rules! asm {
@@ -51,39 +51,59 @@ impl AsmBuilder {
         Ok(())
     }
 
-    fn get_temp(&mut self, value: Value) -> String {
-        self.temps
-            .entry(value)
-            .or_insert_with(|| {
-                let res = if self.temp_id <= 4 {
-                    format!("t{}", self.temp_id)
-                } else {
-                    // TODO 临时做法
-                    format!("a{}", self.temp_id - 4)
-                };
-                self.temp_id += 1;
-                res
-            })
-            .clone()
+    fn align_to_16(size: usize) -> usize {
+        (size + 15) / 16 * 16
     }
 
-    fn load_value(
+    fn get_temp(&mut self, value: Value) -> String {
+        let res = self.temps.entry(value).or_insert_with(|| {
+            let res = self.temp_id;
+            self.temp_id += 4;
+            res
+        });
+        format!("{res}(sp)")
+    }
+
+    fn load_to(
         &mut self,
         value: Value,
         reg: &str,
         func_data: &FunctionData,
-    ) -> Result<String, GenerateAsmError> {
+    ) -> Result<(), GenerateAsmError> {
         match func_data.dfg().value(value).kind() {
             ValueKind::Integer(int) => {
-                if int.value() == 0 {
-                    Ok("x0".to_owned())
-                } else {
-                    asm!(self, "li {}, {}", reg, int.value());
-                    Ok(reg.to_string())
+                asm!(self, "li {reg}, {}", int.value());
+            }
+            _ => {
+                let slot = self.get_temp(value);
+                asm!(self, "lw {reg}, {slot}");
+            }
+        }
+        Ok(())
+    }
+
+    fn store_from(&mut self, value: Value, reg: &str) -> Result<(), GenerateAsmError> {
+        let slot = self.get_temp(value);
+        asm!(self, "sw {reg}, {slot}");
+        Ok(())
+    }
+
+    fn prepare_stack_slots(&mut self, func_data: &FunctionData) -> usize {
+        self.temp_id = 0;
+        self.temps.clear();
+
+        for (_bb, node) in func_data.layout().bbs() {
+            for &inst in node.insts().keys() {
+                match func_data.dfg().value(inst).kind() {
+                    ValueKind::Alloc(_) | ValueKind::Binary(_) | ValueKind::Load(_) => {
+                        self.get_temp(inst);
+                    }
+                    _ => {}
                 }
             }
-            _ => Ok(self.get_temp(value)),
         }
+
+        Self::align_to_16(self.temp_id)
     }
 
     pub fn gen_program(&mut self, program: &Program) -> Result<String, GenerateAsmError> {
@@ -106,9 +126,12 @@ impl AsmBuilder {
         asm!(self, ".globl {}", name);
         writeln!(self.output, "{}:", name)?;
 
+        let s = self.prepare_stack_slots(func_data);
+        asm!(self, "addi sp, sp, -{s}");
+
         for (_bb, node) in func_data.layout().bbs() {
             for &inst in node.insts().keys() {
-                self.gen_value(inst, func_data)?;
+                self.gen_value(inst, func_data, s)?;
             }
         }
 
@@ -119,68 +142,92 @@ impl AsmBuilder {
         &mut self,
         value: Value,
         func_data: &FunctionData,
+        s: usize,
     ) -> Result<(), GenerateAsmError> {
-        match func_data.dfg().value(value).kind() {
+        let value_data = func_data.dfg().value(value);
+        match value_data.kind() {
             ValueKind::Return(ret) => {
                 let value = ret.value().ok_or(GenerateAsmError::Unknown)?;
-                let reg = self.load_value(value, "a0", func_data)?;
-                if reg != "a0" {
-                    asm!(self, "mv a0, {}", reg);
-                }
+                self.load_to(value, "a0", func_data)?;
+                asm!(self, "addi sp, sp, {s}");
                 asm!(self, "ret");
             }
             ValueKind::Binary(bin) => {
                 let op = bin.op();
-                let dst = self.get_temp(value);
-                let lhs = self.load_value(bin.lhs(), "t5", func_data)?;
-                let rhs = self.load_value(bin.rhs(), "t6", func_data)?;
+                self.load_to(bin.lhs(), "t0", func_data)?;
+                self.load_to(bin.rhs(), "t1", func_data)?;
 
                 match op {
                     BinaryOp::Eq => {
-                        asm!(self, "xor {dst}, {lhs}, {rhs}");
-                        asm!(self, "seqz {dst}, {dst}");
+                        asm!(self, "xor t2, t0, t1");
+                        asm!(self, "seqz t2, t2");
                     }
                     BinaryOp::NotEq => {
-                        asm!(self, "xor {dst}, {lhs}, {rhs}");
-                        asm!(self, "snez {dst}, {dst}");
+                        asm!(self, "xor t2, t0, t1");
+                        asm!(self, "snez t2, t2");
                     }
                     BinaryOp::Add => {
-                        asm!(self, "add {dst}, {lhs}, {rhs}");
+                        asm!(self, "add t2, t0, t1");
                     }
                     BinaryOp::Sub => {
-                        asm!(self, "sub {dst}, {lhs}, {rhs}");
+                        asm!(self, "sub t2, t0, t1");
                     }
                     BinaryOp::Mul => {
-                        asm!(self, "mul {dst}, {lhs}, {rhs}");
+                        asm!(self, "mul t2, t0, t1");
                     }
                     BinaryOp::Div => {
-                        asm!(self, "div {dst}, {lhs}, {rhs}");
+                        asm!(self, "div t2, t0, t1");
                     }
                     BinaryOp::Mod => {
-                        asm!(self, "rem {dst}, {lhs}, {rhs}");
+                        asm!(self, "rem t2, t0, t1");
                     }
                     BinaryOp::Lt => {
-                        asm!(self, "slt {dst}, {lhs}, {rhs}");
+                        asm!(self, "slt t2, t0, t1");
                     }
                     BinaryOp::Gt => {
-                        asm!(self, "slt {dst}, {rhs}, {lhs}");
+                        asm!(self, "slt t2, t1, t0");
                     }
                     BinaryOp::Le => {
-                        asm!(self, "slt {dst}, {rhs}, {lhs}");
-                        asm!(self, "seqz {dst}, {dst}");
+                        asm!(self, "slt t2, t1, t0");
+                        asm!(self, "seqz t2, t2");
                     }
                     BinaryOp::Ge => {
-                        asm!(self, "slt {dst}, {lhs}, {rhs}");
-                        asm!(self, "seqz {dst}, {dst}");
+                        asm!(self, "slt t2, t0, t1");
+                        asm!(self, "seqz t2, t2");
                     }
                     BinaryOp::And => {
-                        asm!(self, "and {dst}, {lhs}, {rhs}");
+                        asm!(self, "and t2, t0, t1");
                     }
                     BinaryOp::Or => {
-                        asm!(self, "or {dst}, {lhs}, {rhs}");
+                        asm!(self, "or t2, t0, t1");
                     }
-                    _ => unimplemented!("{:?}", op),
+                    BinaryOp::Xor => {
+                        asm!(self, "xor t2, t0, t1");
+                    }
+                    BinaryOp::Shl => {
+                        asm!(self, "sll t2, t0, t1");
+                    }
+                    BinaryOp::Shr => {
+                        asm!(self, "srl t2, t0, t1");
+                    }
+                    BinaryOp::Sar => {
+                        asm!(self, "sra t2, t0, t1");
+                    }
                 }
+                self.store_from(value, "t2")?;
+            }
+            ValueKind::Alloc(_) => {
+                self.get_temp(value);
+            }
+            ValueKind::Store(store) => {
+                self.load_to(store.value(), "t0", func_data)?;
+                let dest = self.get_temp(store.dest());
+                asm!(self, "sw t0, {dest}");
+            }
+            ValueKind::Load(load) => {
+                let src = self.get_temp(load.src());
+                asm!(self, "lw t0, {src}");
+                self.store_from(value, "t0")?;
             }
             kind => {
                 unimplemented!("{:?}", kind);
