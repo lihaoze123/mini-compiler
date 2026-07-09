@@ -69,6 +69,21 @@ ConstExp: ConstExp = <exp: Exp> => ConstExp { <> };
 LVal: LVal = <id: Ident> => LVal { <> };
 
 Stmt: Stmt = {
+  MatchedStmt => <>,
+  UnmatchedStmt => <>,
+}
+
+MatchedStmt: Stmt = {
+  <s: SimpleStmt> => s,
+  "if" "(" <cond: Exp> ")" <then_stmt: MatchedStmt> "else" <else_stmt: MatchedStmt> => Stmt::If(cond, Box::new(then_stmt), Some(Box::new(else_stmt))),
+}
+
+UnmatchedStmt: Stmt = {
+  "if" "(" <cond: Exp> ")" <then_stmt: Stmt> => Stmt::If(cond, Box::new(then_stmt), None),
+  "if" "(" <cond: Exp> ")" <then_stmt: MatchedStmt> "else" <else_stmt: UnmatchedStmt> => Stmt::If(cond, Box::new(then_stmt), Some(Box::new(else_stmt))),
+}
+
+SimpleStmt: Stmt = {
   <l_val: LVal> "=" <exp: Exp> ";" => Stmt::Assign(l_val, exp),
   <exp: Exp> ";" => Stmt::Exp(Some(exp)),
   ";" => Stmt::Exp(None),

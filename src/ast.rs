@@ -1,4 +1,3 @@
-
 #[derive(Debug)]
 pub struct CompUnit {
     pub func_def: FuncDef,
@@ -34,6 +33,7 @@ pub enum Stmt {
     Exp(Option<Exp>),
     Block(Block),
     Return(Exp),
+    If(Exp, Box<Stmt>, Option<Box<Stmt>>),
 }
 
 #[derive(Debug)]

@@ -1,4 +1,4 @@
-use koopa::ir::{BinaryOp, FunctionData, Program, Value, ValueKind};
+use koopa::ir::{BasicBlock, BinaryOp, FunctionData, Program, Value, ValueKind};
 use std::{
     collections::HashMap,
     fmt::{self, Write},
@@ -29,6 +29,9 @@ pub enum GenerateAsmError {
 
     #[error("缺少栈槽")]
     MissingStackSlot,
+
+    #[error("基本块无名称")]
+    BBNoName,
 
     #[error("未知错误")]
     Unknown,
@@ -113,6 +116,27 @@ impl AsmBuilder {
         Ok(())
     }
 
+    fn strip_prefix(s: &str) -> Result<String, GenerateAsmError> {
+        let res = match &s[0..1] {
+            x @ ("@" | "%") => s.strip_prefix(x).ok_or(GenerateAsmError::Parse)?,
+            _ => {
+                return Err(GenerateAsmError::Parse);
+            }
+        };
+        Ok(res.to_string())
+    }
+
+    fn get_bb_name(&self, bb: BasicBlock, ctx: &FuncCtx<'_>) -> Result<String, GenerateAsmError> {
+        Self::strip_prefix(
+            ctx.func_data
+                .dfg()
+                .bb(bb)
+                .name()
+                .as_ref()
+                .ok_or(GenerateAsmError::BBNoName)?,
+        )
+    }
+
     fn load_to(
         &mut self,
         value: Value,
@@ -153,10 +177,7 @@ impl AsmBuilder {
     }
 
     fn gen_func(&mut self, func_data: &FunctionData) -> Result<(), GenerateAsmError> {
-        let name = func_data
-            .name()
-            .strip_prefix("@")
-            .ok_or(GenerateAsmError::Parse)?;
+        let name = Self::strip_prefix(func_data.name())?;
 
         asm!(self, ".text");
         asm!(self, ".globl {}", name);
@@ -170,6 +191,9 @@ impl AsmBuilder {
         asm!(self, "addi sp, sp, -{s}");
 
         for (_bb, node) in func_data.layout().bbs() {
+            let name = self.get_bb_name(*_bb, &ctx)?;
+            writeln!(self.output, "{}:", name)?;
+
             for &inst in node.insts().keys() {
                 self.gen_value(inst, &ctx)?;
             }
@@ -262,6 +286,19 @@ impl AsmBuilder {
                 let src = ctx.frame.slot(load.src())?;
                 asm!(self, "lw t0, {src}");
                 self.store_from(value, "t0", ctx)?;
+            }
+            ValueKind::Branch(branch) => {
+                self.load_to(branch.cond(), "t0", ctx)?;
+
+                let true_bb = self.get_bb_name(branch.true_bb(), ctx)?;
+                let false_bb = self.get_bb_name(branch.false_bb(), ctx)?;
+
+                asm!(self, "bnez t0, {true_bb}");
+                asm!(self, "j {false_bb}");
+            }
+            ValueKind::Jump(jump) => {
+                let target_bb = self.get_bb_name(jump.target(), ctx)?;
+                asm!(self, "j {target_bb}");
             }
             kind => {
                 unimplemented!("{:?}", kind);

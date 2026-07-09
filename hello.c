@@ -1,8 +1,6 @@
-int main() {
-    int x = 10;
-    {
-        x = x + 1;
-        int x = 10;
+int f() {
+    if (1) {
+        return 0;
     }
-    return x;
+    return 0;
 }

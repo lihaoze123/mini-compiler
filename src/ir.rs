@@ -39,6 +39,7 @@ enum Symbol {
 pub struct IRBuilder {
     output: String,
     temp_id: usize,
+    label_id: usize,
     var_id: usize,
     symbols: Vec<HashMap<Ident, Symbol>>,
 }
@@ -47,6 +48,12 @@ impl fmt::Display for Ident {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "@{}", self.id)
     }
+}
+
+macro_rules! ir {
+    ($builder:expr, $($arg:tt)*) => {
+        $builder.emit(format_args!($($arg)*))?
+    };
 }
 
 impl IRBuilder {
@@ -60,6 +67,28 @@ impl IRBuilder {
         res
     }
 
+    fn new_label(&mut self) -> String {
+        let res = format!("%label_{}", self.label_id);
+        self.label_id += 1;
+        res
+    }
+
+    fn emit(&mut self, args: fmt::Arguments<'_>) -> Result<(), IRBuilderErr> {
+        writeln!(self.output, "\t{}", args)?;
+        Ok(())
+    }
+
+    fn block_terminated(&self) -> bool {
+        self.output
+            .lines()
+            .rev()
+            .find(|line| !line.trim().is_empty())
+            .is_some_and(|line| {
+                let line = line.trim_start();
+                line.starts_with("ret ") || line.starts_with("jump ") || line.starts_with("br ")
+            })
+    }
+
     fn emit_binary(
         &mut self,
         op: impl std::fmt::Display,
@@ -67,7 +96,7 @@ impl IRBuilder {
         rhs: impl std::fmt::Display,
     ) -> Result<String, IRBuilderErr> {
         let temp = self.new_temp();
-        writeln!(self.output, "{temp} = {op} {lhs}, {rhs}")?;
+        ir!(self, "{temp} = {op} {lhs}, {rhs}");
         Ok(temp)
     }
 
@@ -162,14 +191,14 @@ impl IRBuilder {
             Some(init_val) => self.gen_exp(&init_val.exp)?,
             None => "0".to_owned(),
         };
-        
+
         let name = format!("@{}_{}", id.id, self.var_id);
         self.var_id += 1;
 
         self.define_symbol(id, Symbol::Var(name.clone()))?;
 
-        writeln!(self.output, "{name} = alloc {b_type}")?;
-        writeln!(self.output, "store {value}, {name}")?;
+        ir!(self, "{name} = alloc {b_type}");
+        ir!(self, "store {value}, {name}");
         Ok(())
     }
 
@@ -200,12 +229,57 @@ impl IRBuilder {
             }
             Stmt::Exp(None) => Ok(()),
             Stmt::Block(block) => self.gen_block(block),
+            Stmt::If(exp, then_stmt, else_stmt) => {
+                let value = self.gen_exp(exp)?;
+                match else_stmt {
+                    Some(else_stmt) => {
+                        let then_label = self.new_label();
+                        let else_label = self.new_label();
+                        let end_label = self.new_label();
+
+                        ir!(self, "br {value}, {then_label}, {else_label}");
+
+                        writeln!(self.output, "{then_label}:")?;
+                        self.gen_stmt(then_stmt)?;
+                        let then_terminated = self.block_terminated();
+                        if !then_terminated {
+                            ir!(self, "jump {end_label}");
+                        }
+
+                        writeln!(self.output, "{else_label}:")?;
+                        self.gen_stmt(else_stmt)?;
+                        let else_terminated = self.block_terminated();
+                        if !else_terminated {
+                            ir!(self, "jump {end_label}");
+                        }
+
+                        if !(then_terminated && else_terminated) {
+                            writeln!(self.output, "{end_label}:")?;
+                        }
+                    }
+                    None => {
+                        let then_label = self.new_label();
+                        let end_label = self.new_label();
+
+                        ir!(self, "br {value}, {then_label}, {end_label}");
+
+                        writeln!(self.output, "{then_label}:")?;
+                        self.gen_stmt(then_stmt)?;
+                        if !self.block_terminated() {
+                            ir!(self, "jump {end_label}");
+                        }
+
+                        writeln!(self.output, "{end_label}:")?;
+                    }
+                };
+                Ok(())
+            }
         }
     }
 
     fn gen_return(&mut self, ret: &Exp) -> Result<(), IRBuilderErr> {
         let value = self.gen_exp(ret)?;
-        writeln!(self.output, "ret {value}")?;
+        ir!(self, "ret {value}");
         Ok(())
     }
 
@@ -214,7 +288,7 @@ impl IRBuilder {
             Symbol::Const(_) => Err(IRBuilderErr::AssignToConst(l_val.id.to_string())),
             Symbol::Var(name) => {
                 let value = self.gen_exp(exp)?;
-                writeln!(self.output, "store {value}, {name}")?;
+                ir!(self, "store {value}, {name}");
                 Ok(())
             }
         }
@@ -302,13 +376,13 @@ impl IRBuilder {
                 let temp_id = self.new_temp();
                 match unary_op {
                     UnaryOp::Minus => {
-                        writeln!(self.output, "{temp_id} = sub 0, {value}")?;
+                        ir!(self, "{temp_id} = sub 0, {value}");
                     }
                     UnaryOp::Plus => {
                         return Ok(value);
                     }
                     UnaryOp::Not => {
-                        writeln!(self.output, "{temp_id} = eq 0, {value}")?;
+                        ir!(self, "{temp_id} = eq 0, {value}");
                     }
                 }
                 Ok(temp_id)
@@ -329,7 +403,7 @@ impl IRBuilder {
             Symbol::Const(value) => Ok(value.to_string()),
             Symbol::Var(name) => {
                 let temp = self.new_temp();
-                writeln!(self.output, "{temp} = load {name}")?;
+                ir!(self, "{temp} = load {name}");
                 Ok(temp)
             }
         }
