@@ -78,17 +78,6 @@ impl IRBuilder {
         Ok(())
     }
 
-    fn block_terminated(&self) -> bool {
-        self.output
-            .lines()
-            .rev()
-            .find(|line| !line.trim().is_empty())
-            .is_some_and(|line| {
-                let line = line.trim_start();
-                line.starts_with("ret ") || line.starts_with("jump ") || line.starts_with("br ")
-            })
-    }
-
     fn emit_binary(
         &mut self,
         op: impl std::fmt::Display,
@@ -144,20 +133,27 @@ impl IRBuilder {
         Ok(())
     }
 
-    fn gen_block(&mut self, block: &Block) -> Result<(), IRBuilderErr> {
+    fn gen_block(&mut self, block: &Block) -> Result<bool, IRBuilderErr> {
         self.symbols.push(HashMap::new());
 
+        let mut terminated = false;
         for item in &block.items {
-            self.gen_block_item(item)?;
+            if self.gen_block_item(item)? {
+                terminated = true;
+                break;
+            }
         }
 
         self.symbols.pop();
-        Ok(())
+        Ok(terminated)
     }
 
-    fn gen_block_item(&mut self, block: &BlockItem) -> Result<(), IRBuilderErr> {
+    fn gen_block_item(&mut self, block: &BlockItem) -> Result<bool, IRBuilderErr> {
         match block {
-            BlockItem::Decl(decl) => self.gen_decl(decl),
+            BlockItem::Decl(decl) => {
+                self.gen_decl(decl)?;
+                Ok(false)
+            }
             BlockItem::Stmt(stmt) => self.gen_stmt(stmt),
         }
     }
@@ -219,15 +215,21 @@ impl IRBuilder {
         Ok(())
     }
 
-    fn gen_stmt(&mut self, stmt: &Stmt) -> Result<(), IRBuilderErr> {
+    fn gen_stmt(&mut self, stmt: &Stmt) -> Result<bool, IRBuilderErr> {
         match stmt {
-            Stmt::Return(ret) => self.gen_return(ret),
-            Stmt::Assign(l_val, exp) => self.gen_assign(l_val, exp),
+            Stmt::Return(ret) => {
+                self.gen_return(ret)?;
+                Ok(true)
+            }
+            Stmt::Assign(l_val, exp) => {
+                self.gen_assign(l_val, exp)?;
+                Ok(false)
+            }
             Stmt::Exp(Some(exp)) => {
                 self.gen_exp(exp)?;
-                Ok(())
+                Ok(false)
             }
-            Stmt::Exp(None) => Ok(()),
+            Stmt::Exp(None) => Ok(false),
             Stmt::Block(block) => self.gen_block(block),
             Stmt::If(exp, then_stmt, else_stmt) => {
                 let value = self.gen_exp(exp)?;
@@ -240,22 +242,22 @@ impl IRBuilder {
                         ir!(self, "br {value}, {then_label}, {else_label}");
 
                         writeln!(self.output, "{then_label}:")?;
-                        self.gen_stmt(then_stmt)?;
-                        let then_terminated = self.block_terminated();
+                        let then_terminated = self.gen_stmt(then_stmt)?;
                         if !then_terminated {
                             ir!(self, "jump {end_label}");
                         }
 
                         writeln!(self.output, "{else_label}:")?;
-                        self.gen_stmt(else_stmt)?;
-                        let else_terminated = self.block_terminated();
+                        let else_terminated = self.gen_stmt(else_stmt)?;
                         if !else_terminated {
                             ir!(self, "jump {end_label}");
                         }
 
-                        if !(then_terminated && else_terminated) {
+                        let terminated = then_terminated && else_terminated;
+                        if !terminated {
                             writeln!(self.output, "{end_label}:")?;
                         }
+                        Ok(terminated)
                     }
                     None => {
                         let then_label = self.new_label();
@@ -264,15 +266,15 @@ impl IRBuilder {
                         ir!(self, "br {value}, {then_label}, {end_label}");
 
                         writeln!(self.output, "{then_label}:")?;
-                        self.gen_stmt(then_stmt)?;
-                        if !self.block_terminated() {
+                        let then_terminated = self.gen_stmt(then_stmt)?;
+                        if !then_terminated {
                             ir!(self, "jump {end_label}");
                         }
 
                         writeln!(self.output, "{end_label}:")?;
+                        Ok(false)
                     }
-                };
-                Ok(())
+                }
             }
         }
     }
