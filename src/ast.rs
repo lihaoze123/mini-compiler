@@ -1,3 +1,5 @@
+use std::fmt::Display;
+
 #[derive(Debug)]
 pub struct CompUnit {
     pub func_def: FuncDef,
@@ -28,8 +30,9 @@ pub enum BlockItem {
 }
 
 #[derive(Debug)]
-pub struct Stmt {
-    pub exp: Exp,
+pub enum Stmt {
+    Assign(LVal, Exp),
+    Return(Exp),
 }
 
 #[derive(Debug)]
@@ -46,6 +49,7 @@ pub enum UnaryExp {
 #[derive(Debug)]
 pub enum Decl {
     ConstDecl(ConstDecl),
+    VarDecl(VarDecl),
 }
 
 #[derive(Debug)]
@@ -54,8 +58,9 @@ pub struct ConstDecl {
     pub const_defs: Vec<ConstDef>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, derive_more::Display)]
 pub enum BType {
+    #[display("i32")]
     Int,
 }
 
@@ -71,11 +76,42 @@ pub struct ConstInitVal {
 }
 
 #[derive(Debug)]
+pub struct VarDecl {
+    pub b_type: BType,
+    pub var_defs: Vec<VarDef>,
+}
+
+#[derive(Debug)]
+pub enum VarDef {
+    ID(Ident),
+    InitVal(Ident, InitVal),
+}
+
+#[derive(Debug)]
+pub struct InitVal {
+    pub exp: Exp,
+}
+
+impl Default for InitVal {
+    fn default() -> Self {
+        Self {
+            exp: Exp {
+                l_or_exp: LOrExp::LAndExp(LAndExp::EqExp(EqExp::RelExp(RelExp::AddExp(
+                    AddExp::MulExp(MulExp::UnaryExp(UnaryExp::PrimaryExp(PrimaryExp::Number(
+                        Number { value: 0 },
+                    )))),
+                )))),
+            },
+        }
+    }
+}
+
+#[derive(Debug)]
 pub struct ConstExp {
     pub exp: Exp,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct LVal {
     pub id: Ident,
 }
@@ -99,7 +135,7 @@ pub enum AddExp {
     AddOp(Box<AddExp>, AddOp, MulExp),
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy)]
 pub struct Number {
     pub value: IntConst,
 }
@@ -173,6 +209,15 @@ pub enum UnaryOp {
     Not,
 }
 
-pub type IntConst = i32;
+#[derive(Debug, Clone, Hash, PartialEq, Eq)]
+pub struct Ident {
+    pub id: String,
+}
 
-pub type Ident = String;
+impl From<Ident> for String {
+    fn from(value: Ident) -> Self {
+        value.id
+    }
+}
+
+pub type IntConst = i32;

@@ -1,4 +1,5 @@
 int main() {
-    const int x = 123 + 456;
+    int x = 10;
+    x = x + 1;
     return x;
 }

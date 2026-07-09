@@ -26,7 +26,10 @@ BlockItem: BlockItem = {
   <stmt: Stmt> => BlockItem::Stmt(stmt),
 };
 
-Decl: Decl = <const_decl: ConstDecl> => Decl::ConstDecl(const_decl);
+Decl: Decl = {
+  <const_decl: ConstDecl> => Decl::ConstDecl(const_decl),
+  <var_decl: VarDecl> => Decl::VarDecl(var_decl),
+};
 
 ConstDecl: ConstDecl = "const" <b_type: BType> <const_defs: ConstDefs> ";" => ConstDecl { <> };
 
@@ -44,11 +47,31 @@ ConstDef: ConstDef = <id: Ident> "=" <const_init_val: ConstInitVal> => ConstDef 
 
 ConstInitVal: ConstInitVal = <const_exp: ConstExp> => ConstInitVal { <> };
 
+VarDecl: VarDecl = <b_type: BType> <var_defs: VarDefs> ";" => VarDecl { <> };
+
+VarDefs: Vec<VarDef> = {
+  <def: VarDef> => vec![def],
+  <mut defs: VarDefs> "," <def: VarDef> => {
+    defs.push(def);
+    defs
+  }
+};
+
+VarDef: VarDef = {
+  <id: Ident> => VarDef::ID(id),
+  <id: Ident> "=" <init_val: InitVal> => VarDef::InitVal(id, init_val),
+};
+
+InitVal: InitVal = <exp: Exp> => InitVal { <> };
+
 ConstExp: ConstExp = <exp: Exp> => ConstExp { <> };
 
 LVal: LVal = <id: Ident> => LVal { <> };
 
-Stmt: Stmt = "return" <exp: Exp> ";" => Stmt { <> };
+Stmt: Stmt = {
+  <l_val: LVal> "=" <exp: Exp> ";" => Stmt::Assign(l_val, exp),
+  "return" <exp: Exp> ";" => Stmt::Return(exp),
+}
 
 Number: Number = <value: IntConst> => Number { <> };
 
@@ -136,7 +159,7 @@ UnaryOp: UnaryOp = {
   "!" => UnaryOp::Not,
 };
 
-Ident: String = r"[_a-zA-Z][_a-zA-Z0-9]*" => <>.to_string();
+Ident: Ident = r"[_a-zA-Z][_a-zA-Z0-9]*" => Ident { id: <>.to_string() };
 
 IntConst: i32 = {
   r"[1-9][0-9]*" => i32::from_str_radix(<>, 10).unwrap(),

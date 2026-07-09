@@ -1,9 +1,11 @@
+use core::fmt;
 use std::{collections::HashMap, fmt::Write};
 use thiserror::Error;
 
 use crate::ast::{
-    AddExp, AddOp, Block, BlockItem, CompUnit, ConstDecl, Decl, EqExp, EqOp, Exp, FuncDef, LAndExp,
-    LOrExp, MulExp, MulOp, PrimaryExp, RelExp, RelOp, Stmt, UnaryExp, UnaryOp,
+    AddExp, AddOp, BType, Block, BlockItem, CompUnit, ConstDecl, ConstInitVal, Decl, EqExp, EqOp,
+    Exp, FuncDef, Ident, InitVal, LAndExp, LOrExp, LVal, MulExp, MulOp, Number, PrimaryExp, RelExp,
+    RelOp, Stmt, UnaryExp, UnaryOp, VarDecl, VarDef,
 };
 
 #[derive(Error, Debug)]
@@ -14,11 +16,32 @@ pub enum IRBuilderErr {
     UndefinedSymbol(String),
 }
 
+#[derive(Clone)]
+enum Value {
+    Number(Number),
+    LVal(LVal),
+}
+
+impl From<Value> for PrimaryExp {
+    fn from(value: Value) -> Self {
+        match value {
+            Value::LVal(l_val) => PrimaryExp::LVal(l_val),
+            Value::Number(num) => PrimaryExp::Number(num),
+        }
+    }
+}
+
 #[derive(Default)]
 pub struct IRBuilder {
     output: String,
     temp_id: usize,
-    consts: HashMap<String, i32>,
+    symbols: HashMap<Ident, Value>,
+}
+
+impl fmt::Display for Ident {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "@{}", self.id)
+    }
 }
 
 impl IRBuilder {
@@ -47,6 +70,23 @@ impl IRBuilder {
         self.emit_binary("ne", "0", value)
     }
 
+    fn get_symbol(&self, id: &Ident) -> Result<Value, IRBuilderErr> {
+        self.symbols
+            .get(&id)
+            .cloned()
+            .ok_or_else(|| IRBuilderErr::UndefinedSymbol(id.to_string()))
+    }
+    
+    fn load_var(&mut self, id: &Ident) -> Result<String, IRBuilderErr> {
+        if !self.symbols.contains_key(id) {
+            return Err(IRBuilderErr::UndefinedSymbol(id.to_string()));
+        }
+
+        let temp = self.new_temp();
+        writeln!(self.output, "{temp} = load {id}")?;
+        Ok(temp)
+    }
+
     pub fn gen_comp_unit(&mut self, comp_unit: &CompUnit) -> Result<String, IRBuilderErr> {
         self.output.clear();
         self.gen_func_def(&comp_unit.func_def)?;
@@ -56,7 +96,7 @@ impl IRBuilder {
     fn gen_func_def(&mut self, func_def: &FuncDef) -> Result<(), IRBuilderErr> {
         writeln!(
             self.output,
-            "fun @{}(): {} {{",
+            "fun {}(): {} {{",
             func_def.id, func_def.func_type
         )?;
         self.gen_block(&func_def.block)?;
@@ -84,21 +124,70 @@ impl IRBuilder {
     fn gen_decl(&mut self, decl: &Decl) -> Result<(), IRBuilderErr> {
         match decl {
             Decl::ConstDecl(const_decl) => self.gen_const_decl(const_decl),
+            Decl::VarDecl(var_decl) => self.gen_var_decl(var_decl),
         }
     }
 
-    fn gen_const_decl(&mut self, const_decl: &ConstDecl) -> Result<(), IRBuilderErr> {
-        for def in &const_decl.const_defs {
-            let value = self.eval_exp(&def.const_init_val.const_exp.exp)?;
-            self.consts.insert(def.id.clone(), value);
+    fn gen_var_decl(&mut self, var_decl: &VarDecl) -> Result<(), IRBuilderErr> {
+        for def in &var_decl.var_defs {
+            match def {
+                VarDef::ID(id) => self.gen_var_def(&var_decl.b_type, id, &InitVal::default())?,
+                VarDef::InitVal(id, init_val) => {
+                    self.gen_var_def(&var_decl.b_type, id, init_val)?
+                }
+            }
         }
         Ok(())
     }
 
-    fn gen_stmt(&mut self, stmt: &Stmt) -> Result<(), IRBuilderErr> {
-        let value = self.gen_exp(&stmt.exp)?;
-        writeln!(self.output, "ret {}", value)?;
+    fn gen_var_def(
+        &mut self,
+        b_type: &BType,
+        id: &Ident,
+        init_val: &InitVal,
+    ) -> Result<(), IRBuilderErr> {
+        let value = self.gen_exp(&init_val.exp)?;
+        self.symbols
+            .insert(id.clone(), Value::LVal(LVal { id: id.clone() }));
+        writeln!(self.output, "{id} = alloc {b_type}")?;
+        writeln!(self.output, "store {value}, {id}")?;
+        Ok(())
+    }
 
+    fn gen_const_decl(&mut self, const_decl: &ConstDecl) -> Result<(), IRBuilderErr> {
+        for def in &const_decl.const_defs {
+            self.gen_const_def(&def.id, &def.const_init_val)?;
+        }
+        Ok(())
+    }
+
+    fn gen_const_def(
+        &mut self,
+        id: &Ident,
+        const_init_val: &ConstInitVal,
+    ) -> Result<(), IRBuilderErr> {
+        let value = self.eval_exp(&const_init_val.const_exp.exp)?;
+        self.symbols
+            .insert(id.clone(), Value::Number(Number { value }));
+        Ok(())
+    }
+
+    fn gen_stmt(&mut self, stmt: &Stmt) -> Result<(), IRBuilderErr> {
+        match stmt {
+            Stmt::Return(ret) => self.gen_return(&ret),
+            Stmt::Assign(l_val, exp) => self.gen_assign(l_val, exp),
+        }
+    }
+
+    fn gen_return(&mut self, ret: &Exp) -> Result<(), IRBuilderErr> {
+        let value = self.gen_exp(ret)?;
+        writeln!(self.output, "ret {value}")?;
+        Ok(())
+    }
+
+    fn gen_assign(&mut self, l_val: &LVal, exp: &Exp) -> Result<(), IRBuilderErr> {
+        let value = self.gen_exp(exp)?;
+        writeln!(self.output, "store {value}, {}", l_val.id)?;
         Ok(())
     }
 
@@ -203,11 +292,11 @@ impl IRBuilder {
             PrimaryExp::Exp(exp) => self.gen_exp(exp),
             PrimaryExp::Number(num) => Ok(num.value.to_string()),
             PrimaryExp::LVal(l_val) => {
-                let value = self
-                    .consts
-                    .get(&l_val.id)
-                    .ok_or_else(|| IRBuilderErr::UndefinedSymbol(l_val.id.clone()))?;
-                Ok(value.to_string())
+                let value = self.get_symbol(&l_val.id)?;
+                match value {
+                    Value::LVal(l_val) => self.load_var(&l_val.id),
+                    Value::Number(num) => Ok(num.value.to_string()),
+                }
             }
         }
     }
@@ -315,11 +404,10 @@ impl IRBuilder {
         match primary_exp {
             PrimaryExp::Exp(exp) => self.eval_exp(exp),
             PrimaryExp::Number(num) => Ok(num.value),
-            PrimaryExp::LVal(l_val) => self
-                .consts
-                .get(&l_val.id)
-                .copied()
-                .ok_or_else(|| IRBuilderErr::UndefinedSymbol(l_val.id.clone())),
+            PrimaryExp::LVal(l_val) => {
+                let value = self.get_symbol(&l_val.id)?;
+                self.eval_primary_exp(&value.into())
+            }
         }
     }
 }
