@@ -40,6 +40,7 @@ pub enum GenerateAsmError {
 #[derive(Default)]
 pub struct AsmBuilder {
     output: String,
+    edge_label_id: usize,
 }
 
 struct FuncCtx<'a> {
@@ -57,13 +58,21 @@ struct StackSlot {
 struct StackFrame {
     size: usize,
     slots: HashMap<Value, StackSlot>,
+    arg_scratch_slots: Vec<StackSlot>,
 }
 
 impl StackFrame {
     fn build(func_data: &FunctionData) -> Self {
         let mut frame = Self::default();
 
-        for (_bb, node) in func_data.layout().bbs() {
+        let mut max_bb_params = 0;
+        for (bb, node) in func_data.layout().bbs() {
+            let params = func_data.dfg().bb(*bb).params();
+            max_bb_params = max_bb_params.max(params.len());
+            for &param in params {
+                frame.alloc_slot(param);
+            }
+
             for &inst in node.insts().keys() {
                 match func_data.dfg().value(inst).kind() {
                     ValueKind::Alloc(_) | ValueKind::Binary(_) | ValueKind::Load(_) => {
@@ -72,6 +81,10 @@ impl StackFrame {
                     _ => {}
                 }
             }
+        }
+
+        for _ in 0..max_bb_params {
+            frame.alloc_arg_scratch_slot();
         }
 
         frame.size = Self::align_to_16(frame.size);
@@ -88,9 +101,22 @@ impl StackFrame {
         self.slots.insert(value, slot);
     }
 
+    fn alloc_arg_scratch_slot(&mut self) {
+        let slot = StackSlot { offset: self.size };
+        self.size += 4;
+        self.arg_scratch_slots.push(slot);
+    }
+
     fn slot(&self, value: Value) -> Result<StackSlot, GenerateAsmError> {
         self.slots
             .get(&value)
+            .copied()
+            .ok_or(GenerateAsmError::MissingStackSlot)
+    }
+
+    fn arg_scratch_slot(&self, index: usize) -> Result<StackSlot, GenerateAsmError> {
+        self.arg_scratch_slots
+            .get(index)
             .copied()
             .ok_or(GenerateAsmError::MissingStackSlot)
     }
@@ -114,6 +140,12 @@ impl AsmBuilder {
     fn emit(&mut self, args: fmt::Arguments<'_>) -> Result<(), GenerateAsmError> {
         writeln!(self.output, "\t{}", args)?;
         Ok(())
+    }
+
+    fn new_edge_label(&mut self) -> String {
+        let label = format!(".L_edge_{}", self.edge_label_id);
+        self.edge_label_id += 1;
+        label
     }
 
     fn strip_prefix(s: &str) -> Result<String, GenerateAsmError> {
@@ -166,8 +198,35 @@ impl AsmBuilder {
         Ok(())
     }
 
+    fn pass_bb_args(
+        &mut self,
+        target: BasicBlock,
+        args: &[Value],
+        ctx: &FuncCtx<'_>,
+    ) -> Result<(), GenerateAsmError> {
+        let params = ctx.func_data.dfg().bb(target).params();
+        if params.len() != args.len() {
+            return Err(GenerateAsmError::Unknown);
+        }
+
+        for (index, &arg) in args.iter().enumerate() {
+            let scratch = ctx.frame.arg_scratch_slot(index)?;
+            self.load_to(arg, "t1", ctx)?;
+            asm!(self, "sw t1, {scratch}");
+        }
+
+        for (index, &param) in params.iter().enumerate() {
+            let scratch = ctx.frame.arg_scratch_slot(index)?;
+            asm!(self, "lw t1, {scratch}");
+            self.store_from(param, "t1", ctx)?;
+        }
+
+        Ok(())
+    }
+
     pub fn gen_program(&mut self, program: &Program) -> Result<String, GenerateAsmError> {
         self.output.clear();
+        self.edge_label_id = 0;
 
         for &func in program.func_layout() {
             self.gen_func(program.func(func))?;
@@ -189,6 +248,13 @@ impl AsmBuilder {
         };
         let s = ctx.frame.size;
         asm!(self, "addi sp, sp, -{s}");
+
+        // for (_bb, node) in func_data.layout().bbs() {
+        //     for &inst in node.insts().keys() {
+        //         let inst_data = func_data.dfg().value(inst);
+        //         eprintln!("{inst:?}: {inst_data:?}");
+        //     }
+        // }
 
         for (_bb, node) in func_data.layout().bbs() {
             let name = self.get_bb_name(*_bb, &ctx)?;
@@ -293,11 +359,24 @@ impl AsmBuilder {
                 let true_bb = self.get_bb_name(branch.true_bb(), ctx)?;
                 let false_bb = self.get_bb_name(branch.false_bb(), ctx)?;
 
-                asm!(self, "bnez t0, {true_bb}");
-                asm!(self, "j {false_bb}");
+                if branch.true_args().is_empty() && branch.false_args().is_empty() {
+                    asm!(self, "bnez t0, {true_bb}");
+                    asm!(self, "j {false_bb}");
+                } else {
+                    let false_edge = self.new_edge_label();
+                    asm!(self, "beqz t0, {false_edge}");
+
+                    self.pass_bb_args(branch.true_bb(), branch.true_args(), ctx)?;
+                    asm!(self, "j {true_bb}");
+
+                    writeln!(self.output, "{false_edge}:")?;
+                    self.pass_bb_args(branch.false_bb(), branch.false_args(), ctx)?;
+                    asm!(self, "j {false_bb}");
+                }
             }
             ValueKind::Jump(jump) => {
                 let target_bb = self.get_bb_name(jump.target(), ctx)?;
+                self.pass_bb_args(jump.target(), jump.args(), ctx)?;
                 asm!(self, "j {target_bb}");
             }
             kind => {

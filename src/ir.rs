@@ -52,7 +52,13 @@ impl fmt::Display for Ident {
 
 macro_rules! ir {
     ($builder:expr, $($arg:tt)*) => {
-        $builder.emit(format_args!($($arg)*))?
+        $builder.emit::<true>(format_args!($($arg)*))?
+    };
+}
+
+macro_rules! label {
+    ($builder:expr, $($arg:tt)*) => {
+        $builder.emit::<false>(format_args!($($arg)*))?
     };
 }
 
@@ -73,8 +79,12 @@ impl IRBuilder {
         res
     }
 
-    fn emit(&mut self, args: fmt::Arguments<'_>) -> Result<(), IRBuilderErr> {
-        writeln!(self.output, "\t{}", args)?;
+    fn emit<const IDENT: bool>(&mut self, args: fmt::Arguments<'_>) -> Result<(), IRBuilderErr> {
+        if IDENT {
+            writeln!(self.output, "\t{}", args)?;
+        } else {
+            writeln!(self.output, "{}", args)?;
+        }
         Ok(())
     }
 
@@ -87,10 +97,6 @@ impl IRBuilder {
         let temp = self.new_temp();
         ir!(self, "{temp} = {op} {lhs}, {rhs}");
         Ok(temp)
-    }
-
-    fn boolify(&mut self, value: String) -> Result<String, IRBuilderErr> {
-        self.emit_binary("ne", "0", value)
     }
 
     fn define_symbol(&mut self, id: &Ident, symbol: Symbol) -> Result<(), IRBuilderErr> {
@@ -120,15 +126,11 @@ impl IRBuilder {
     }
 
     fn gen_func_def(&mut self, func_def: &FuncDef) -> Result<(), IRBuilderErr> {
-        writeln!(
-            self.output,
-            "fun {}(): {} {{",
-            func_def.id, func_def.func_type
-        )?;
-        writeln!(self.output, "%entry:")?;
+        label!(self, "fun {}(): {} {{", func_def.id, func_def.func_type);
+        label!(self, "%entry:");
 
         self.gen_block(&func_def.block)?;
-        writeln!(self.output, "}}")?;
+        label!(self, "}}");
 
         Ok(())
     }
@@ -243,6 +245,10 @@ impl IRBuilder {
         then_stmt: &Stmt,
         else_stmt: Option<&Stmt>,
     ) -> Result<bool, IRBuilderErr> {
+        let entry_label = self.new_label("if_entry");
+        ir!(self, "jump {entry_label}");
+        label!(self, "{entry_label}:");
+
         let value = self.gen_exp(cond)?;
 
         let true_label = self.new_label("then");
@@ -259,11 +265,11 @@ impl IRBuilder {
 
         let terminated = then_terminated && else_terminated;
         if !terminated {
-            writeln!(self.output, "{end_label}:")?;
+            label!(self, "{end_label}:");
         }
         Ok(terminated)
     }
-    
+
     fn gen_if_arm(
         &mut self,
         label: &str,
@@ -272,7 +278,7 @@ impl IRBuilder {
     ) -> Result<bool, IRBuilderErr> {
         match stmt {
             Some(stmt) => {
-                writeln!(self.output, "{label}:")?;
+                label!(self, "{label}:");
 
                 let terminated = self.gen_stmt(stmt)?;
                 if !terminated {
@@ -311,10 +317,19 @@ impl IRBuilder {
             LOrExp::LAndExp(l_and_exp) => self.gen_l_and_exp(l_and_exp),
             LOrExp::LOrOp(l_or_exp, l_and_exp) => {
                 let lhs = self.gen_l_or_exp(l_or_exp)?;
+
+                let rhs_label = self.new_label("or_rhs");
+                let true_label = self.new_label("or_true");
+                let false_label = self.new_label("or_false");
+                let end_label = self.new_label("or_end");
+
+                ir!(self, "br {lhs}, {true_label}, {rhs_label}");
+
+                label!(self, "{rhs_label}:");
                 let rhs = self.gen_l_and_exp(l_and_exp)?;
-                let lhs = self.boolify(lhs)?;
-                let rhs = self.boolify(rhs)?;
-                self.emit_binary("or", lhs, rhs)
+                ir!(self, "br {rhs}, {true_label}, {false_label}");
+
+                self.gen_bool_merge(&true_label, &false_label, &end_label)
             }
         }
     }
@@ -324,12 +339,38 @@ impl IRBuilder {
             LAndExp::EqExp(eq_exp) => self.gen_eq_exp(eq_exp),
             LAndExp::LAndOp(l_and_exp, eq_exp) => {
                 let lhs = self.gen_l_and_exp(l_and_exp)?;
+
+                let rhs_label = self.new_label("and_rhs");
+                let true_label = self.new_label("and_true");
+                let false_label = self.new_label("and_false");
+                let end_label = self.new_label("and_end");
+
+                ir!(self, "br {lhs}, {rhs_label}, {false_label}");
+
+                label!(self, "{rhs_label}:");
                 let rhs = self.gen_eq_exp(eq_exp)?;
-                let lhs = self.boolify(lhs)?;
-                let rhs = self.boolify(rhs)?;
-                self.emit_binary("and", lhs, rhs)
+                ir!(self, "br {rhs}, {true_label}, {false_label}");
+
+                self.gen_bool_merge(&true_label, &false_label, &end_label)
             }
         }
+    }
+
+    fn gen_bool_merge(
+        &mut self,
+        true_label: &str,
+        false_label: &str,
+        end_label: &str,
+    ) -> Result<String, IRBuilderErr> {
+        label!(self, "{true_label}:");
+        ir!(self, "jump {end_label}(1)");
+
+        label!(self, "{false_label}:");
+        ir!(self, "jump {end_label}(0)");
+
+        let result = self.new_temp();
+        label!(self, "{end_label}({result}: i32):");
+        Ok(result)
     }
 
     fn gen_eq_exp(&mut self, eq_exp: &EqExp) -> Result<String, IRBuilderErr> {
@@ -426,8 +467,12 @@ impl IRBuilder {
             LOrExp::LAndExp(l_and_exp) => self.eval_l_and_exp(l_and_exp),
             LOrExp::LOrOp(l_or_exp, l_and_exp) => {
                 let lhs = self.eval_l_or_exp(l_or_exp)?;
-                let rhs = self.eval_l_and_exp(l_and_exp)?;
-                Ok((lhs != 0 || rhs != 0).into())
+                if lhs != 0 {
+                    Ok(1)
+                } else {
+                    let rhs = self.eval_l_and_exp(l_and_exp)?;
+                    Ok((rhs != 0).into())
+                }
             }
         }
     }
@@ -437,8 +482,12 @@ impl IRBuilder {
             LAndExp::EqExp(eq_exp) => self.eval_eq_exp(eq_exp),
             LAndExp::LAndOp(l_and_op, eq_exp) => {
                 let lhs = self.eval_l_and_exp(l_and_op)?;
-                let rhs = self.eval_eq_exp(eq_exp)?;
-                Ok((lhs != 0 && rhs != 0).into())
+                if lhs == 0 {
+                    Ok(0)
+                } else {
+                    let rhs = self.eval_eq_exp(eq_exp)?;
+                    Ok((rhs != 0).into())
+                }
             }
         }
     }
