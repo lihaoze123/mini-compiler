@@ -1,19 +1,29 @@
 #[derive(Debug)]
-pub struct CompUnit {
-    pub func_def: FuncDef,
+pub enum CompUnit {
+    FuncDef(FuncDef),
+    CompUnit(Box<CompUnit>, FuncDef),
 }
 
 #[derive(Debug)]
 pub struct FuncDef {
     pub func_type: FuncType,
     pub id: Ident,
+    pub params: Option<Vec<FuncFParam>>,
     pub block: Block,
+}
+
+#[derive(Debug)]
+pub struct FuncFParam {
+    pub b_type: BType,
+    pub id: Ident,
 }
 
 #[derive(Debug, derive_more::Display)]
 pub enum FuncType {
     #[display("i32")]
     Int,
+    #[display("void")]
+    Void,
 }
 
 #[derive(Debug)]
@@ -33,7 +43,7 @@ pub enum Stmt {
     Update(LVal, AddOp),
     Exp(Option<Exp>),
     Block(Block),
-    Return(Exp),
+    Return(Option<Exp>),
     Break,
     Continue,
     If(Exp, Box<Stmt>, Option<Box<Stmt>>),
@@ -54,6 +64,7 @@ pub struct Exp {
 pub enum UnaryExp {
     PrimaryExp(PrimaryExp),
     UnaryOp(UnaryOp, Box<UnaryExp>),
+    FuncCall(Ident, Option<Vec<Exp>>),
 }
 
 #[derive(Debug)]

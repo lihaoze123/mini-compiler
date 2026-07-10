@@ -137,7 +137,10 @@ impl IRBuilder {
                     }
                 }
                 Ok(temp.into())
-            }
+            },
+            UnaryExp::FuncCall(id, params) => {
+                todo!()
+            },
         }
     }
 

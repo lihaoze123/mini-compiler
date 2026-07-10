@@ -9,15 +9,34 @@ match {
   _
 }
 
-pub CompUnit: CompUnit = <func_def: FuncDef> => CompUnit { <> };
-
-FuncDef: FuncDef = {
-  <func_type: FuncType> <id: Ident> "(" ")" <block: Block> => {
-    FuncDef { <> }
-  }
+pub CompUnit: CompUnit = {
+  <func_def: FuncDef> => CompUnit::FuncDef(func_def),
+  <comp_unit: CompUnit> <func_def: FuncDef> => CompUnit::CompUnit(Box::new(comp_unit), func_def),
 };
 
-FuncType: FuncType = "int" => FuncType::Int;
+FuncDef: FuncDef = {
+  <func_type: FuncType> <id: Ident> "(" <params: FuncFParams> ")" <block: Block> => {
+    FuncDef { func_type, id, params: Some(params), block }
+  },
+  <func_type: FuncType> <id: Ident> "(" ")" <block: Block> => {
+    FuncDef { func_type, id, params: None, block }
+  },
+};
+
+FuncType: FuncType = {
+  "int" => FuncType::Int,
+  "void" => FuncType::Void,
+};
+
+FuncFParam: FuncFParam = <b_type: BType> <id: Ident> => FuncFParam { <> };
+
+FuncFParams: Vec<FuncFParam> = {
+  FuncFParam => vec![<>],
+  <mut func_fparams: FuncFParams> <func_fparam: FuncFParam> => {
+    func_fparams.push(func_fparam);
+    func_fparams
+  },
+};
 
 Block: Block = "{" <items: BlockItem*> "}" => Block { <> };
 
@@ -88,10 +107,15 @@ SimpleStmt: Stmt = {
   <exp: Exp> ";" => Stmt::Exp(Some(exp)),
   ";" => Stmt::Exp(None),
   <block: Block> => Stmt::Block(block),
-  "return" <exp: Exp> ";" => Stmt::Return(exp),
   "break" ";" => Stmt::Break,
   "continue" ";" => Stmt::Continue,
+  Return => <>,
   Loop => <>,
+};
+
+Return: Stmt = {
+  "return" <exp: Exp> ";" => Stmt::Return(Some(exp)),
+  "return" ";" => Stmt::Return(None),
 };
 
 Assign: Stmt = {
@@ -126,6 +150,20 @@ UnaryExp: UnaryExp = {
   <primary_exp: PrimaryExp> => UnaryExp::PrimaryExp(primary_exp),
   <unary_op: UnaryOp> <unary_exp: UnaryExp> => {
     UnaryExp::UnaryOp(unary_op, Box::new(unary_exp))
+  },
+  FuncCall => <>,
+};
+
+FuncCall: UnaryExp = {
+  <id: Ident> "(" ")" => UnaryExp::FuncCall(id, None),
+  <id: Ident> "(" <func_rparams: FuncRParams> ")" => UnaryExp::FuncCall(id, Some(func_rparams)),
+};
+
+FuncRParams: Vec<Exp> = {
+  <exp: Exp> => vec![exp],
+  <mut func_rparams: FuncRParams> "," <exp: Exp> => {
+    func_rparams.push(exp);
+    func_rparams
   },
 };
 

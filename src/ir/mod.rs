@@ -33,8 +33,20 @@ impl IRBuilder {
     }
 
     pub fn gen_comp_unit(&mut self, comp_unit: &CompUnit) -> Result<String, IRBuilderErr> {
-        self.context.reset_generation();
-        self.gen_func_def(&comp_unit.func_def)?;
+        let mut res = String::new();
+        match comp_unit {
+            CompUnit::FuncDef(func_def) => {
+                self.context.reset_generation();
+                self.gen_func_def(func_def)?;
+                res.push_str(&self.context.take_output());
+            }
+            CompUnit::CompUnit(comp_unit, func_def) => {
+                res.push_str(&self.gen_comp_unit(comp_unit)?);
+                self.context.reset_generation();
+                self.gen_func_def(func_def)?;
+                res.push_str(&self.context.take_output());
+            },
+        };
         Ok(self.context.take_output())
     }
 }

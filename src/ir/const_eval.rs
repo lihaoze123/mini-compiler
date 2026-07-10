@@ -109,6 +109,9 @@ impl IRBuilder {
                     UnaryOp::Minus => Ok(-value),
                     UnaryOp::Not => Ok((value == 0).into()),
                 }
+            },
+            UnaryExp::FuncCall(id, params) => {
+                todo!()
             }
         }
     }

@@ -34,7 +34,9 @@ impl IRBuilder {
     fn gen_stmt(&mut self, stmt: &Stmt) -> Result<ControlFlow, IRBuilderErr> {
         match stmt {
             Stmt::Return(ret) => {
-                self.gen_return(ret)?;
+                if let Some(ret) = ret {
+                    self.gen_return(ret)?;
+                }
                 Ok(ControlFlow::Terminated)
             }
             Stmt::Assign(l_val, exp) => {
@@ -158,7 +160,7 @@ impl IRBuilder {
         // condition
         emit_instruction!(self, "jump {cond_label}");
         emit_line!(self, "{cond_label}:");
-        
+
         if let Some(cond) = cond {
             let value = self.gen_exp(cond)?;
             emit_instruction!(self, "br {value}, {body_label}, {end_label}");
@@ -177,7 +179,7 @@ impl IRBuilder {
         if !body_flow.is_terminated() {
             emit_instruction!(self, "jump {inc_label}");
         }
-        
+
         emit_line!(self, "{inc_label}:");
         if let Some(inc) = inc {
             self.gen_stmt(inc)?;
