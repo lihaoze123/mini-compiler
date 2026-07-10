@@ -1,7 +1,10 @@
 use core::fmt;
 use std::fmt::Write;
 
-use crate::ast::Ident;
+use crate::{
+    ast::{BType, FuncType, Ident},
+    ir::symbol::Scope,
+};
 
 use super::{
     error::IRBuilderErr,
@@ -47,6 +50,42 @@ pub(super) struct VariableAddress {
 impl fmt::Display for VariableAddress {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "@{}_{}", self.identifier, self.id)
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum Type {
+    I32,
+    Void,
+}
+
+impl From<BType> for Type {
+    fn from(value: BType) -> Self {
+        match value {
+            BType::Int => Type::I32,
+        }
+    }
+}
+
+impl From<FuncType> for Type {
+    fn from(value: FuncType) -> Self {
+        match value {
+            FuncType::Int => Type::I32,
+            FuncType::Void => Type::Void,
+        }
+    }
+}
+
+#[derive(Clone)]
+pub(super) struct Func {
+    pub(super) identifier: String,
+    pub(super) params: Vec<Type>,
+    pub(super) ret: Type,
+}
+
+impl fmt::Display for Func {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "@{}", self.identifier)
     }
 }
 
@@ -109,6 +148,8 @@ pub(super) struct IRContext {
     var_id: usize,
     symbols: ScopeStack,
     loops: Vec<LoopFrame>,
+    global_symbols: Scope,
+    current_return_type: Option<Type>,
 }
 
 impl IRContext {
@@ -117,6 +158,7 @@ impl IRContext {
         self.temp_id = 0;
         self.symbols.clear();
         self.loops.clear();
+        self.current_return_type = None;
     }
 
     pub(super) fn take_output(&mut self) -> String {
@@ -145,6 +187,15 @@ impl IRContext {
         };
         self.var_id += 1;
         variable
+    }
+
+    pub(super) fn set_current_return_type(&mut self, return_type: Option<Type>) {
+        self.current_return_type = return_type;
+    }
+
+    pub(super) fn current_return_type(&self) -> Result<Type, IRBuilderErr> {
+        self.current_return_type
+            .ok_or(IRBuilderErr::NoCurrentFunction)
     }
 
     pub(super) fn emit_instruction(
@@ -185,6 +236,21 @@ impl IRContext {
 
     pub(super) fn get_symbol(&self, id: &Ident) -> Result<Symbol, IRBuilderErr> {
         self.symbols.get(id)
+    }
+
+    pub(super) fn define_global_symbol(
+        &mut self,
+        id: &Ident,
+        symbol: Symbol,
+    ) -> Result<(), IRBuilderErr> {
+        self.global_symbols.define(id, symbol)
+    }
+
+    pub(super) fn get_global_symbol(&self, id: &Ident) -> Result<Symbol, IRBuilderErr> {
+        self.global_symbols
+            .get(id)
+            .cloned()
+            .ok_or(IRBuilderErr::UndefinedSymbol(id.to_string()))
     }
 
     pub(super) fn push_loop(&mut self, continue_label: Label, break_label: Label) {

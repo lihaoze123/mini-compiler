@@ -12,13 +12,14 @@ pub struct FuncDef {
     pub block: Block,
 }
 
-#[derive(Debug)]
+#[derive(Debug, derive_more::Display)]
+#[display("{id}: {b_type}")]
 pub struct FuncFParam {
     pub b_type: BType,
     pub id: Ident,
 }
 
-#[derive(Debug, derive_more::Display)]
+#[derive(Debug, derive_more::Display, Clone, Copy)]
 pub enum FuncType {
     #[display("i32")]
     Int,
@@ -64,7 +65,7 @@ pub struct Exp {
 pub enum UnaryExp {
     PrimaryExp(PrimaryExp),
     UnaryOp(UnaryOp, Box<UnaryExp>),
-    FuncCall(Ident, Option<Vec<Exp>>),
+    FuncCall(Ident, Vec<Exp>),
 }
 
 #[derive(Debug)]
@@ -79,7 +80,7 @@ pub struct ConstDecl {
     pub const_defs: Vec<ConstDef>,
 }
 
-#[derive(Debug, derive_more::Display)]
+#[derive(Debug, derive_more::Display, Clone, Copy)]
 pub enum BType {
     #[display("i32")]
     Int,

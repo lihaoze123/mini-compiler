@@ -1,7 +1,7 @@
 use core::fmt;
 use std::collections::HashMap;
 
-use crate::ast::Ident;
+use crate::{ast::Ident, ir::context::Func};
 
 use super::{
     context::{Immediate, VariableAddress},
@@ -12,11 +12,29 @@ use super::{
 pub(super) enum Symbol {
     Const(Immediate),
     Var(VariableAddress),
+    Func(Func),
+}
+
+#[derive(Default)]
+pub(super) struct Scope(HashMap<Ident, Symbol>);
+
+impl Scope {
+    pub(super) fn define(&mut self, id: &Ident, symbol: Symbol) -> Result<(), IRBuilderErr> {
+        if self.0.contains_key(id) {
+            return Err(IRBuilderErr::DuplicateSymbol(id.to_string()));
+        }
+        self.0.insert(id.clone(), symbol);
+        Ok(())
+    }
+
+    pub(super) fn get(&self, id: &Ident) -> Option<&Symbol> {
+        self.0.get(id)
+    }
 }
 
 #[derive(Default)]
 pub(super) struct ScopeStack {
-    scopes: Vec<HashMap<Ident, Symbol>>,
+    scopes: Vec<Scope>,
 }
 
 impl ScopeStack {
@@ -25,7 +43,7 @@ impl ScopeStack {
     }
 
     pub(super) fn push(&mut self) {
-        self.scopes.push(HashMap::new());
+        self.scopes.push(Scope::default());
     }
 
     pub(super) fn pop(&mut self) {
@@ -34,12 +52,7 @@ impl ScopeStack {
 
     pub(super) fn define(&mut self, id: &Ident, symbol: Symbol) -> Result<(), IRBuilderErr> {
         let scope = self.scopes.last_mut().ok_or(IRBuilderErr::NoScope)?;
-        if scope.contains_key(id) {
-            return Err(IRBuilderErr::DuplicateSymbol(id.to_string()));
-        }
-
-        scope.insert(id.clone(), symbol);
-        Ok(())
+        scope.define(id, symbol)
     }
 
     pub(super) fn get(&self, id: &Ident) -> Result<Symbol, IRBuilderErr> {

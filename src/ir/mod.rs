@@ -45,8 +45,8 @@ impl IRBuilder {
                 self.context.reset_generation();
                 self.gen_func_def(func_def)?;
                 res.push_str(&self.context.take_output());
-            },
+            }
         };
-        Ok(self.context.take_output())
+        Ok(res)
     }
 }

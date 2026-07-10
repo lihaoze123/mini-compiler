@@ -109,10 +109,8 @@ impl IRBuilder {
                     UnaryOp::Minus => Ok(-value),
                     UnaryOp::Not => Ok((value == 0).into()),
                 }
-            },
-            UnaryExp::FuncCall(id, params) => {
-                todo!()
             }
+            UnaryExp::FuncCall(id, _) => Err(IRBuilderErr::NonConstSymbol(id.to_string())),
         }
     }
 
@@ -128,6 +126,7 @@ impl IRBuilder {
         match self.context.get_symbol(id)? {
             Symbol::Const(value) => Ok(value.value()),
             Symbol::Var(_) => Err(IRBuilderErr::NonConstSymbol(id.to_string())),
+            Symbol::Func(_) => Err(IRBuilderErr::InvalidLVal(id.to_string())),
         }
     }
 }

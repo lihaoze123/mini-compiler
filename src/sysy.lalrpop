@@ -32,7 +32,7 @@ FuncFParam: FuncFParam = <b_type: BType> <id: Ident> => FuncFParam { <> };
 
 FuncFParams: Vec<FuncFParam> = {
   FuncFParam => vec![<>],
-  <mut func_fparams: FuncFParams> <func_fparam: FuncFParam> => {
+  <mut func_fparams: FuncFParams> "," <func_fparam: FuncFParam> => {
     func_fparams.push(func_fparam);
     func_fparams
   },
@@ -155,8 +155,8 @@ UnaryExp: UnaryExp = {
 };
 
 FuncCall: UnaryExp = {
-  <id: Ident> "(" ")" => UnaryExp::FuncCall(id, None),
-  <id: Ident> "(" <func_rparams: FuncRParams> ")" => UnaryExp::FuncCall(id, Some(func_rparams)),
+  <id: Ident> "(" ")" => UnaryExp::FuncCall(id, Vec::default()),
+  <id: Ident> "(" <func_rparams: FuncRParams> ")" => UnaryExp::FuncCall(id, func_rparams),
 };
 
 FuncRParams: Vec<Exp> = {

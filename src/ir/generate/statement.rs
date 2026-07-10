@@ -1,7 +1,12 @@
 use crate::ast::{AddOp, Block, BlockItem, Exp, LVal, Stmt};
 
 use super::{
-    super::{IRBuilder, context::Label, error::IRBuilderErr, symbol::Symbol},
+    super::{
+        IRBuilder,
+        context::{Label, Type},
+        error::IRBuilderErr,
+        symbol::Symbol,
+    },
     ControlFlow,
 };
 
@@ -34,9 +39,7 @@ impl IRBuilder {
     fn gen_stmt(&mut self, stmt: &Stmt) -> Result<ControlFlow, IRBuilderErr> {
         match stmt {
             Stmt::Return(ret) => {
-                if let Some(ret) = ret {
-                    self.gen_return(ret)?;
-                }
+                self.gen_return(ret.as_ref())?;
                 Ok(ControlFlow::Terminated)
             }
             Stmt::Assign(l_val, exp) => {
@@ -90,7 +93,7 @@ impl IRBuilder {
         emit_instruction!(self, "jump {entry_label}");
         emit_line!(self, "{entry_label}:");
 
-        let value = self.gen_exp(cond)?;
+        let value = self.gen_value_exp(cond)?;
 
         let true_label = self.context.new_label("then");
         let end_label = self.context.new_label("end");
@@ -162,7 +165,7 @@ impl IRBuilder {
         emit_line!(self, "{cond_label}:");
 
         if let Some(cond) = cond {
-            let value = self.gen_exp(cond)?;
+            let value = self.gen_value_exp(cond)?;
             emit_instruction!(self, "br {value}, {body_label}, {end_label}");
         } else {
             emit_instruction!(self, "jump {body_label}");
@@ -194,20 +197,31 @@ impl IRBuilder {
         }
     }
 
-    fn gen_return(&mut self, ret: &Exp) -> Result<(), IRBuilderErr> {
-        let value = self.gen_exp(ret)?;
-        emit_instruction!(self, "ret {value}");
-        Ok(())
+    fn gen_return(&mut self, ret: Option<&Exp>) -> Result<(), IRBuilderErr> {
+        match (self.context.current_return_type()?, ret) {
+            (Type::I32, Some(ret)) => {
+                let value = self.gen_value_exp(ret)?;
+                emit_instruction!(self, "ret {value}");
+                Ok(())
+            }
+            (Type::I32, None) => Err(IRBuilderErr::MissingReturnValue),
+            (Type::Void, Some(_)) => Err(IRBuilderErr::UnexpectedReturnValue),
+            (Type::Void, None) => {
+                emit_instruction!(self, "ret");
+                Ok(())
+            }
+        }
     }
 
     fn gen_assign(&mut self, l_val: &LVal, exp: &Exp) -> Result<(), IRBuilderErr> {
         match self.context.get_symbol(&l_val.id)? {
             Symbol::Const(_) => Err(IRBuilderErr::AssignToConst(l_val.id.to_string())),
             Symbol::Var(variable) => {
-                let value = self.gen_exp(exp)?;
+                let value = self.gen_value_exp(exp)?;
                 emit_instruction!(self, "store {value}, {variable}");
                 Ok(())
             }
+            Symbol::Func(_) => Err(IRBuilderErr::InvalidLVal(l_val.id.to_string())),
         }
     }
 
@@ -222,6 +236,7 @@ impl IRBuilder {
                 emit_instruction!(self, "store {new_value}, {variable}");
                 Ok(())
             }
+            Symbol::Func(_) => Err(IRBuilderErr::InvalidLVal(l_val.id.to_string())),
         }
     }
 }

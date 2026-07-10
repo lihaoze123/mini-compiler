@@ -34,7 +34,7 @@ impl IRBuilder {
         init_val: Option<&InitVal>,
     ) -> Result<(), IRBuilderErr> {
         let value = match init_val {
-            Some(init_val) => self.gen_exp(&init_val.exp)?,
+            Some(init_val) => self.gen_value_exp(&init_val.exp)?,
             None => Value::from(0),
         };
 
