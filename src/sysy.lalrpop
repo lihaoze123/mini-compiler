@@ -71,25 +71,52 @@ LVal: LVal = <id: Ident> => LVal { <> };
 Stmt: Stmt = {
   MatchedStmt => <>,
   UnmatchedStmt => <>,
-}
+};
 
 MatchedStmt: Stmt = {
   <s: SimpleStmt> => s,
   "if" "(" <cond: Exp> ")" <then_stmt: MatchedStmt> "else" <else_stmt: MatchedStmt> => Stmt::If(cond, Box::new(then_stmt), Some(Box::new(else_stmt))),
-}
+};
 
 UnmatchedStmt: Stmt = {
   "if" "(" <cond: Exp> ")" <then_stmt: Stmt> => Stmt::If(cond, Box::new(then_stmt), None),
   "if" "(" <cond: Exp> ")" <then_stmt: MatchedStmt> "else" <else_stmt: UnmatchedStmt> => Stmt::If(cond, Box::new(then_stmt), Some(Box::new(else_stmt))),
-}
+};
 
 SimpleStmt: Stmt = {
-  <l_val: LVal> "=" <exp: Exp> ";" => Stmt::Assign(l_val, exp),
+  Assign => <>,
   <exp: Exp> ";" => Stmt::Exp(Some(exp)),
   ";" => Stmt::Exp(None),
   <block: Block> => Stmt::Block(block),
   "return" <exp: Exp> ";" => Stmt::Return(exp),
-}
+  "break" ";" => Stmt::Break,
+  "continue" ";" => Stmt::Continue,
+  Loop => <>,
+};
+
+Assign: Stmt = {
+  <assign: AssignExpr> ";" => assign,
+};
+
+AssignExpr: Stmt = {
+  <l_val: LVal> "=" <exp: Exp> => Stmt::Assign(l_val, exp),
+  <l_val: LVal> "++" => Stmt::Update(l_val, AddOp::Add),
+  <l_val: LVal> "--" => Stmt::Update(l_val, AddOp::Sub),
+};
+
+Loop: Stmt = {
+  "loop" <stmt: MatchedStmt> => Stmt::Loop { init: None, cond: None, inc: None, body: Box::new(stmt) },
+  ForLoop => <>,
+  WhileLoop => <>,
+};
+
+ForLoop: Stmt = {
+  "for" "(" <init: AssignExpr?> ";" <cond: Exp?> ";" <inc: AssignExpr?> ")" <body: MatchedStmt> => Stmt::Loop { init: init.map(Box::new), cond: cond, inc: inc.map(Box::new), body: Box::new(body) },
+};
+
+WhileLoop: Stmt = {
+  "while" "(" <cond: Exp> ")" <body: MatchedStmt> => Stmt::Loop { init: None, cond: Some(cond), inc: None, body: Box::new(body) },
+};
 
 Number: Number = <value: IntConst> => Number { <> };
 

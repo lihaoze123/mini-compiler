@@ -1,8 +1,11 @@
 int f() {
-    if (!1) {
-        return 0;
-    } else {
-        return 1;
+    int res = 0;
+    int i;
+    for (i = 1; i <= 50; i++) {
+        if (i % 2 == 1) {
+            continue;
+        }
+        res = res + i;
     }
-    return 0;
+    return res;
 }

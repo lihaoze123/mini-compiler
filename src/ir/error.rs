@@ -19,4 +19,7 @@ pub enum IRBuilderErr {
 
     #[error("没有作用域")]
     NoScope,
+    
+    #[error("循环栈为空，在循环外使用了 {0}")]
+    EmptyLoopStack(String),
 }

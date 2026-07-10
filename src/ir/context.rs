@@ -95,6 +95,12 @@ impl fmt::Display for Value {
     }
 }
 
+pub(super) struct LoopFrame {
+    pub(super) continue_label: Label,
+    pub(super) break_label: Label,
+    pub(super) has_break: bool,
+}
+
 #[derive(Default)]
 pub(super) struct IRContext {
     output: String,
@@ -102,6 +108,7 @@ pub(super) struct IRContext {
     label_id: usize,
     var_id: usize,
     symbols: ScopeStack,
+    loops: Vec<LoopFrame>,
 }
 
 impl IRContext {
@@ -109,6 +116,7 @@ impl IRContext {
         self.output.clear();
         self.temp_id = 0;
         self.symbols.clear();
+        self.loops.clear();
     }
 
     pub(super) fn take_output(&mut self) -> String {
@@ -177,5 +185,35 @@ impl IRContext {
 
     pub(super) fn get_symbol(&self, id: &Ident) -> Result<Symbol, IRBuilderErr> {
         self.symbols.get(id)
+    }
+
+    pub(super) fn push_loop(&mut self, continue_label: Label, break_label: Label) {
+        self.loops.push(LoopFrame {
+            continue_label,
+            break_label,
+            has_break: false,
+        });
+    }
+
+    pub(super) fn pop_loop(&mut self) -> Result<LoopFrame, IRBuilderErr> {
+        self.loops
+            .pop()
+            .ok_or(IRBuilderErr::EmptyLoopStack(String::new()))
+    }
+
+    pub(super) fn break_target(&mut self) -> Result<Label, IRBuilderErr> {
+        let frame = self
+            .loops
+            .last_mut()
+            .ok_or(IRBuilderErr::EmptyLoopStack("break".to_owned()))?;
+        frame.has_break = true;
+        Ok(frame.break_label.clone())
+    }
+
+    pub(super) fn continue_target(&self) -> Result<Label, IRBuilderErr> {
+        self.loops
+            .last()
+            .map(|frame| frame.continue_label.clone())
+            .ok_or(IRBuilderErr::EmptyLoopStack("continue".to_owned()))
     }
 }

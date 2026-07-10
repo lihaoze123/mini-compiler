@@ -1,4 +1,4 @@
-use crate::ast::{Block, BlockItem, Exp, LVal, Stmt};
+use crate::ast::{AddOp, Block, BlockItem, Exp, LVal, Stmt};
 
 use super::{
     super::{IRBuilder, context::Label, error::IRBuilderErr, symbol::Symbol},
@@ -41,6 +41,10 @@ impl IRBuilder {
                 self.gen_assign(l_val, exp)?;
                 Ok(ControlFlow::Continues)
             }
+            Stmt::Update(l_val, op) => {
+                self.gen_update(l_val, op)?;
+                Ok(ControlFlow::Continues)
+            }
             Stmt::Exp(Some(exp)) => {
                 self.gen_exp(exp)?;
                 Ok(ControlFlow::Continues)
@@ -49,6 +53,27 @@ impl IRBuilder {
             Stmt::Block(block) => self.gen_block(block),
             Stmt::If(cond, then_stmt, else_stmt) => {
                 self.gen_if(cond, then_stmt.as_ref(), else_stmt.as_deref())
+            }
+            Stmt::Loop {
+                init,
+                cond,
+                inc,
+                body,
+            } => self.gen_loop(
+                init.as_deref(),
+                cond.as_ref(),
+                inc.as_deref(),
+                body.as_ref(),
+            ),
+            Stmt::Break => {
+                let target = self.context.break_target()?;
+                emit_instruction!(self, "jump {target}");
+                Ok(ControlFlow::Terminated)
+            }
+            Stmt::Continue => {
+                let target = self.context.continue_target()?;
+                emit_instruction!(self, "jump {target}");
+                Ok(ControlFlow::Terminated)
             }
         }
     }
@@ -109,6 +134,64 @@ impl IRBuilder {
         }
     }
 
+    fn gen_loop(
+        &mut self,
+        init: Option<&Stmt>,
+        cond: Option<&Exp>,
+        inc: Option<&Stmt>,
+        body: &Stmt,
+    ) -> Result<ControlFlow, IRBuilderErr> {
+        let init_label = self.context.new_label("loop_init");
+        let cond_label = self.context.new_label("loop_cond");
+        let body_label = self.context.new_label("loop_body");
+        let inc_label = self.context.new_label("loop_inc");
+        let end_label = self.context.new_label("loop_end");
+
+        // initialization
+        emit_instruction!(self, "jump {init_label}");
+        emit_line!(self, "{init_label}:");
+
+        if let Some(init) = init {
+            self.gen_stmt(init)?;
+        }
+
+        // condition
+        emit_instruction!(self, "jump {cond_label}");
+        emit_line!(self, "{cond_label}:");
+        
+        if let Some(cond) = cond {
+            let value = self.gen_exp(cond)?;
+            emit_instruction!(self, "br {value}, {body_label}, {end_label}");
+        } else {
+            emit_instruction!(self, "jump {body_label}");
+        }
+
+        // body
+        emit_line!(self, "{body_label}:");
+        self.context.push_loop(inc_label.clone(), end_label.clone());
+
+        let body_result = self.gen_stmt(body);
+        let loop_frame = self.context.pop_loop()?;
+        let body_flow = body_result?;
+
+        if !body_flow.is_terminated() {
+            emit_instruction!(self, "jump {inc_label}");
+        }
+        
+        emit_line!(self, "{inc_label}:");
+        if let Some(inc) = inc {
+            self.gen_stmt(inc)?;
+        }
+        emit_instruction!(self, "jump {cond_label}");
+
+        if cond.is_some() || loop_frame.has_break {
+            emit_line!(self, "{end_label}:");
+            Ok(ControlFlow::Continues)
+        } else {
+            Ok(ControlFlow::Terminated)
+        }
+    }
+
     fn gen_return(&mut self, ret: &Exp) -> Result<(), IRBuilderErr> {
         let value = self.gen_exp(ret)?;
         emit_instruction!(self, "ret {value}");
@@ -121,6 +204,20 @@ impl IRBuilder {
             Symbol::Var(variable) => {
                 let value = self.gen_exp(exp)?;
                 emit_instruction!(self, "store {value}, {variable}");
+                Ok(())
+            }
+        }
+    }
+
+    fn gen_update(&mut self, l_val: &LVal, op: &AddOp) -> Result<(), IRBuilderErr> {
+        match self.context.get_symbol(&l_val.id)? {
+            Symbol::Const(_) => Err(IRBuilderErr::AssignToConst(l_val.id.to_string())),
+            Symbol::Var(variable) => {
+                let old_value = self.context.new_temp();
+                emit_instruction!(self, "{old_value} = load {variable}");
+
+                let new_value = self.context.emit_binary(op, old_value.into(), 1.into())?;
+                emit_instruction!(self, "store {new_value}, {variable}");
                 Ok(())
             }
         }

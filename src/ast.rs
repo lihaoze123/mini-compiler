@@ -30,10 +30,19 @@ pub enum BlockItem {
 #[derive(Debug)]
 pub enum Stmt {
     Assign(LVal, Exp),
+    Update(LVal, AddOp),
     Exp(Option<Exp>),
     Block(Block),
     Return(Exp),
+    Break,
+    Continue,
     If(Exp, Box<Stmt>, Option<Box<Stmt>>),
+    Loop {
+        init: Option<Box<Stmt>>,
+        cond: Option<Exp>,
+        inc: Option<Box<Stmt>>,
+        body: Box<Stmt>,
+    },
 }
 
 #[derive(Debug)]
