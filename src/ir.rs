@@ -67,8 +67,8 @@ impl IRBuilder {
         res
     }
 
-    fn new_label(&mut self) -> String {
-        let res = format!("%label_{}", self.label_id);
+    fn new_label(&mut self, label: &str) -> String {
+        let res = format!("%L_{label}_{}", self.label_id);
         self.label_id += 1;
         res
     }
@@ -231,51 +231,57 @@ impl IRBuilder {
             }
             Stmt::Exp(None) => Ok(false),
             Stmt::Block(block) => self.gen_block(block),
-            Stmt::If(exp, then_stmt, else_stmt) => {
-                let value = self.gen_exp(exp)?;
-                match else_stmt {
-                    Some(else_stmt) => {
-                        let then_label = self.new_label();
-                        let else_label = self.new_label();
-                        let end_label = self.new_label();
-
-                        ir!(self, "br {value}, {then_label}, {else_label}");
-
-                        writeln!(self.output, "{then_label}:")?;
-                        let then_terminated = self.gen_stmt(then_stmt)?;
-                        if !then_terminated {
-                            ir!(self, "jump {end_label}");
-                        }
-
-                        writeln!(self.output, "{else_label}:")?;
-                        let else_terminated = self.gen_stmt(else_stmt)?;
-                        if !else_terminated {
-                            ir!(self, "jump {end_label}");
-                        }
-
-                        let terminated = then_terminated && else_terminated;
-                        if !terminated {
-                            writeln!(self.output, "{end_label}:")?;
-                        }
-                        Ok(terminated)
-                    }
-                    None => {
-                        let then_label = self.new_label();
-                        let end_label = self.new_label();
-
-                        ir!(self, "br {value}, {then_label}, {end_label}");
-
-                        writeln!(self.output, "{then_label}:")?;
-                        let then_terminated = self.gen_stmt(then_stmt)?;
-                        if !then_terminated {
-                            ir!(self, "jump {end_label}");
-                        }
-
-                        writeln!(self.output, "{end_label}:")?;
-                        Ok(false)
-                    }
-                }
+            Stmt::If(cond, then_stmt, else_stmt) => {
+                self.gen_if(cond, then_stmt.as_ref(), else_stmt.as_deref())
             }
+        }
+    }
+
+    fn gen_if(
+        &mut self,
+        cond: &Exp,
+        then_stmt: &Stmt,
+        else_stmt: Option<&Stmt>,
+    ) -> Result<bool, IRBuilderErr> {
+        let value = self.gen_exp(cond)?;
+
+        let true_label = self.new_label("then");
+        let end_label = self.new_label("end");
+        let false_label = match else_stmt {
+            Some(_) => self.new_label("else"),
+            None => end_label.clone(),
+        };
+
+        ir!(self, "br {value}, {true_label}, {false_label}");
+
+        let then_terminated = self.gen_if_arm(&true_label, Some(then_stmt), &end_label)?;
+        let else_terminated = self.gen_if_arm(&false_label, else_stmt, &end_label)?;
+
+        let terminated = then_terminated && else_terminated;
+        if !terminated {
+            writeln!(self.output, "{end_label}:")?;
+        }
+        Ok(terminated)
+    }
+    
+    fn gen_if_arm(
+        &mut self,
+        label: &str,
+        stmt: Option<&Stmt>,
+        end_label: &str,
+    ) -> Result<bool, IRBuilderErr> {
+        match stmt {
+            Some(stmt) => {
+                writeln!(self.output, "{label}:")?;
+
+                let terminated = self.gen_stmt(stmt)?;
+                if !terminated {
+                    ir!(self, "jump {end_label}");
+                }
+
+                Ok(terminated)
+            }
+            None => Ok(false),
         }
     }
 

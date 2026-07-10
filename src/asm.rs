@@ -96,7 +96,7 @@ impl StackFrame {
     }
 
     fn align_to_16(size: usize) -> usize {
-        (size + 15) / 16 * 16
+        size.div_ceil(16) * 16
     }
 }
 
