@@ -1,0 +1,57 @@
+use koopa::ir::{BasicBlock, Value, values::Branch, values::Jump};
+
+use super::{FunctionGenerator, GenerateAsmError};
+
+impl FunctionGenerator<'_, '_> {
+    pub(super) fn gen_branch(&mut self, branch: &Branch) -> Result<(), GenerateAsmError> {
+        self.load_to(branch.cond(), "t0")?;
+
+        let true_bb = self.basic_block_name(branch.true_bb())?;
+        let false_bb = self.basic_block_name(branch.false_bb())?;
+
+        if branch.true_args().is_empty() && branch.false_args().is_empty() {
+            emit_instruction!(self, "bnez t0, {true_bb}");
+            emit_instruction!(self, "j {false_bb}");
+        } else {
+            let false_edge = self.context.new_edge_label();
+            emit_instruction!(self, "beqz t0, {false_edge}");
+
+            self.pass_bb_args(branch.true_bb(), branch.true_args())?;
+            emit_instruction!(self, "j {true_bb}");
+
+            emit_line!(self, "{false_edge}:");
+            self.pass_bb_args(branch.false_bb(), branch.false_args())?;
+            emit_instruction!(self, "j {false_bb}");
+        }
+
+        Ok(())
+    }
+
+    pub(super) fn gen_jump(&mut self, jump: &Jump) -> Result<(), GenerateAsmError> {
+        let target_bb = self.basic_block_name(jump.target())?;
+        self.pass_bb_args(jump.target(), jump.args())?;
+        emit_instruction!(self, "j {target_bb}");
+        Ok(())
+    }
+
+    fn pass_bb_args(&mut self, target: BasicBlock, args: &[Value]) -> Result<(), GenerateAsmError> {
+        let params = self.func_data.dfg().bb(target).params();
+        if params.len() != args.len() {
+            return Err(GenerateAsmError::Unknown);
+        }
+
+        for (index, &arg) in args.iter().enumerate() {
+            let scratch = self.frame.arg_scratch_slot(index)?;
+            self.load_to(arg, "t1")?;
+            emit_instruction!(self, "sw t1, {scratch}");
+        }
+
+        for (index, &param) in params.iter().enumerate() {
+            let scratch = self.frame.arg_scratch_slot(index)?;
+            emit_instruction!(self, "lw t1, {scratch}");
+            self.store_from(param, "t1")?;
+        }
+
+        Ok(())
+    }
+}
