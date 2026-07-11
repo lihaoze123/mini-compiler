@@ -23,6 +23,12 @@ pub enum GenerateAsmError {
     #[error("不支持的全局变量初始化器")]
     UnsupportedGlobalInitializer,
 
+    #[error("期望指针类型")]
+    ExpectedPointer,
+
+    #[error("不支持的 Koopa 值: {0}")]
+    UnsupportedValue(String),
+
     #[error("未知错误")]
     Unknown,
 }

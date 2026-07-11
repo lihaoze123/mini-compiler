@@ -1,10 +1,13 @@
-use crate::ast::{BType, ConstDecl, ConstInitVal, Decl, Ident, InitVal, VarDecl, VarDef};
+use crate::ast::{ConstDecl, Decl, Exp, VarDecl};
 
-use super::super::{
-    IRBuilder,
-    context::{Immediate, Value},
-    error::IRBuilderErr,
-    symbol::Symbol,
+use super::{
+    super::{
+        IRBuilder,
+        context::{Immediate, Type, Value, VariableAddress},
+        error::IRBuilderErr,
+        symbol::{Object, Symbol},
+    },
+    initializer::{InitNode, format_aggregate, normalize_initializer, scalar_count},
 };
 
 impl IRBuilder {
@@ -17,52 +20,59 @@ impl IRBuilder {
 
     fn gen_var_decl(&mut self, var_decl: &VarDecl) -> Result<(), IRBuilderErr> {
         for def in &var_decl.var_defs {
-            match def {
-                VarDef::ID(id) => self.gen_var_def(&var_decl.b_type, id, None)?,
-                VarDef::InitVal(id, init_val) => {
-                    self.gen_var_def(&var_decl.b_type, id, Some(init_val))?
+            let ty = self.build_decl_type(var_decl.b_type, &def.dimensions)?;
+            let variable = self.context.new_variable(&def.id);
+
+            emit_instruction!(self, "{variable} = alloc {ty}");
+            self.context.define_symbol(
+                &def.id,
+                Symbol::Object(Object {
+                    address: variable.clone(),
+                    ty: ty.clone(),
+                    mutable: true,
+                    const_values: None,
+                }),
+            )?;
+
+            match &def.init {
+                Some(init) => {
+                    let values = normalize_initializer(&ty, InitNode::from(init))?;
+                    self.emit_local_initializer(variable.into(), &ty, &values)?;
                 }
+                None if ty == Type::I32 => {
+                    emit_instruction!(self, "store 0, {variable}");
+                }
+                None => {}
             }
         }
         Ok(())
     }
 
-    fn gen_var_def(
-        &mut self,
-        b_type: &BType,
-        id: &Ident,
-        init_val: Option<&InitVal>,
-    ) -> Result<(), IRBuilderErr> {
-        let value = match init_val {
-            Some(init_val) => self.gen_value_exp(&init_val.exp)?,
-            None => Value::from(0),
-        };
-
-        let variable = self.context.new_variable(id);
-        self.context
-            .define_symbol(id, Symbol::Var(variable.clone()))?;
-
-        emit_instruction!(self, "{variable} = alloc {b_type}");
-        emit_instruction!(self, "store {value}, {variable}");
-        Ok(())
-    }
-
     fn gen_const_decl(&mut self, const_decl: &ConstDecl) -> Result<(), IRBuilderErr> {
-        let _ = const_decl.b_type;
         for def in &const_decl.const_defs {
-            self.gen_const_def(&def.id, &def.const_init_val)?;
-        }
-        Ok(())
-    }
+            let ty = self.build_decl_type(const_decl.b_type, &def.dimensions)?;
+            let normalized = normalize_initializer(&ty, InitNode::from(&def.init))?;
+            let values = self.eval_constant_initializer(&normalized)?;
 
-    fn gen_const_def(
-        &mut self,
-        id: &Ident,
-        const_init_val: &ConstInitVal,
-    ) -> Result<(), IRBuilderErr> {
-        let value = self.eval_exp(&const_init_val.const_exp.exp)?;
-        self.context
-            .define_symbol(id, Symbol::Const(Immediate::from(value)))?;
+            if ty == Type::I32 {
+                self.context
+                    .define_symbol(&def.id, Symbol::Const(Immediate::from(values[0])))?;
+                continue;
+            }
+
+            let variable = self.context.new_variable(&def.id);
+            emit_instruction!(self, "{variable} = alloc {ty}");
+            self.emit_constant_local_initializer(variable.clone().into(), &ty, &values)?;
+            self.context.define_symbol(
+                &def.id,
+                Symbol::Object(Object {
+                    address: variable,
+                    ty,
+                    mutable: false,
+                    const_values: Some(values),
+                }),
+            )?;
+        }
         Ok(())
     }
 
@@ -75,39 +85,126 @@ impl IRBuilder {
 
     fn gen_global_var_decl(&mut self, var_decl: &VarDecl) -> Result<(), IRBuilderErr> {
         for def in &var_decl.var_defs {
-            let (id, initializer) = match def {
-                VarDef::ID(id) => (id, None),
-                VarDef::InitVal(id, init_val) => (id, Some(self.eval_exp(&init_val.exp)?)),
-            };
-
-            let variable = self.context.new_global_variable(id);
-            self.context
-                .define_global_symbol(id, Symbol::Var(variable.clone()))?;
-
-            match initializer {
-                Some(value) => {
-                    emit_line!(
-                        self,
-                        "global {variable} = alloc {}, {value}",
-                        var_decl.b_type
-                    )
+            let ty = self.build_decl_type(var_decl.b_type, &def.dimensions)?;
+            let values = match &def.init {
+                Some(init) => {
+                    let normalized = normalize_initializer(&ty, InitNode::from(init))?;
+                    self.eval_constant_initializer(&normalized)?
                 }
-                None => emit_line!(
-                    self,
-                    "global {variable} = alloc {}, zeroinit",
-                    var_decl.b_type
-                ),
-            }
+                None => vec![0; scalar_count(&ty)],
+            };
+            let variable = self.context.new_global_variable(&def.id);
+
+            self.emit_global_alloc(&variable, &ty, &values)?;
+            self.context.define_global_symbol(
+                &def.id,
+                Symbol::Object(Object {
+                    address: variable,
+                    ty,
+                    mutable: true,
+                    const_values: None,
+                }),
+            )?;
         }
         Ok(())
     }
 
     fn gen_global_const_decl(&mut self, const_decl: &ConstDecl) -> Result<(), IRBuilderErr> {
         for def in &const_decl.const_defs {
-            let value = self.eval_exp(&def.const_init_val.const_exp.exp)?;
-            self.context
-                .define_global_symbol(&def.id, Symbol::Const(Immediate::from(value)))?;
+            let ty = self.build_decl_type(const_decl.b_type, &def.dimensions)?;
+            let normalized = normalize_initializer(&ty, InitNode::from(&def.init))?;
+            let values = self.eval_constant_initializer(&normalized)?;
+
+            if ty == Type::I32 {
+                self.context
+                    .define_global_symbol(&def.id, Symbol::Const(Immediate::from(values[0])))?;
+                continue;
+            }
+
+            let variable = self.context.new_global_variable(&def.id);
+            self.emit_global_alloc(&variable, &ty, &values)?;
+            self.context.define_global_symbol(
+                &def.id,
+                Symbol::Object(Object {
+                    address: variable,
+                    ty,
+                    mutable: false,
+                    const_values: Some(values),
+                }),
+            )?;
         }
+        Ok(())
+    }
+
+    fn emit_local_initializer(
+        &mut self,
+        base: Value,
+        ty: &Type,
+        values: &[Option<&Exp>],
+    ) -> Result<(), IRBuilderErr> {
+        for (index, init) in values.iter().enumerate() {
+            let value = match init {
+                Some(exp) => Self::expect_i32(self.gen_value_exp(exp)?)?,
+                None => 0.into(),
+            };
+            let address = self.element_address(base.clone(), ty, index)?;
+            emit_instruction!(self, "store {value}, {address}");
+        }
+        Ok(())
+    }
+
+    fn emit_constant_local_initializer(
+        &mut self,
+        base: Value,
+        ty: &Type,
+        values: &[i32],
+    ) -> Result<(), IRBuilderErr> {
+        for (index, value) in values.iter().enumerate() {
+            let address = self.element_address(base.clone(), ty, index)?;
+            emit_instruction!(self, "store {value}, {address}");
+        }
+        Ok(())
+    }
+
+    fn element_address(
+        &mut self,
+        mut address: Value,
+        ty: &Type,
+        mut flat_index: usize,
+    ) -> Result<Value, IRBuilderErr> {
+        let mut current = ty;
+        while let Type::Array(element, _) = current {
+            let element_count = scalar_count(element);
+            let index = flat_index / element_count;
+            flat_index %= element_count;
+            let index = i32::try_from(index).map_err(|_| IRBuilderErr::ArraySizeOverflow)?;
+            address = self.emit_getelemptr(address, index.into())?;
+            current = element;
+        }
+        Ok(address)
+    }
+
+    fn eval_constant_initializer(&self, values: &[Option<&Exp>]) -> Result<Vec<i32>, IRBuilderErr> {
+        values
+            .iter()
+            .map(|value| value.map_or(Ok(0), |exp| self.eval_exp(exp)))
+            .collect()
+    }
+
+    fn emit_global_alloc(
+        &mut self,
+        variable: &VariableAddress,
+        ty: &Type,
+        values: &[i32],
+    ) -> Result<(), IRBuilderErr> {
+        let initializer = if values.iter().all(|value| *value == 0) {
+            "zeroinit".to_owned()
+        } else if *ty == Type::I32 {
+            values[0].to_string()
+        } else {
+            format_aggregate(ty, values)
+        };
+        emit_line!(self, "global {variable} = alloc {ty}, {initializer}");
         Ok(())
     }
 }

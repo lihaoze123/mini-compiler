@@ -1,7 +1,10 @@
 use core::fmt;
 use std::collections::HashMap;
 
-use crate::{ast::Ident, ir::context::Func};
+use crate::{
+    ast::Ident,
+    ir::context::{Func, Type},
+};
 
 use super::{
     context::{Immediate, VariableAddress},
@@ -11,8 +14,16 @@ use super::{
 #[derive(Clone)]
 pub(super) enum Symbol {
     Const(Immediate),
-    Var(VariableAddress),
+    Object(Object),
     Func(Func),
+}
+
+#[derive(Clone)]
+pub(super) struct Object {
+    pub(super) address: VariableAddress,
+    pub(super) ty: Type,
+    pub(super) mutable: bool,
+    pub(super) const_values: Option<Vec<i32>>,
 }
 
 #[derive(Default)]

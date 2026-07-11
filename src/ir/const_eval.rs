@@ -1,9 +1,9 @@
 use crate::ast::{
-    AddExp, AddOp, EqExp, EqOp, Exp, Ident, LAndExp, LOrExp, MulExp, MulOp, PrimaryExp, RelExp,
-    RelOp, UnaryExp, UnaryOp,
+    AddExp, AddOp, EqExp, EqOp, Exp, LAndExp, LOrExp, MulExp, MulOp, PrimaryExp, RelExp, RelOp,
+    UnaryExp, UnaryOp,
 };
 
-use super::{IRBuilder, error::IRBuilderErr, symbol::Symbol};
+use super::{IRBuilder, context::Type, error::IRBuilderErr, symbol::Symbol};
 
 impl IRBuilder {
     pub(super) fn eval_exp(&self, exp: &Exp) -> Result<i32, IRBuilderErr> {
@@ -118,15 +118,58 @@ impl IRBuilder {
         match primary_exp {
             PrimaryExp::Exp(exp) => self.eval_exp(exp),
             PrimaryExp::Number(num) => Ok(num.value),
-            PrimaryExp::LVal(l_val) => self.eval_l_val(&l_val.id),
+            PrimaryExp::LVal(l_val) => self.eval_l_val(l_val),
         }
     }
 
-    fn eval_l_val(&self, id: &Ident) -> Result<i32, IRBuilderErr> {
-        match self.context.get_symbol(id)? {
-            Symbol::Const(value) => Ok(value.value()),
-            Symbol::Var(_) => Err(IRBuilderErr::NonConstSymbol(id.to_string())),
-            Symbol::Func(_) => Err(IRBuilderErr::InvalidLVal(id.to_string())),
+    fn eval_l_val(&self, l_val: &crate::ast::LVal) -> Result<i32, IRBuilderErr> {
+        match self.context.get_symbol(&l_val.id)? {
+            Symbol::Const(value) if l_val.indices.is_empty() => Ok(value.value()),
+            Symbol::Const(_) => Err(IRBuilderErr::TooManyIndices(l_val.id.to_string())),
+            Symbol::Object(object) => {
+                let values = object
+                    .const_values
+                    .ok_or_else(|| IRBuilderErr::NonConstSymbol(l_val.id.to_string()))?;
+                let mut ty = &object.ty;
+                let mut offset = 0usize;
+
+                for index_exp in &l_val.indices {
+                    let index = self.eval_exp(index_exp)?;
+                    let Type::Array(element, length) = ty else {
+                        return Err(IRBuilderErr::TooManyIndices(l_val.id.to_string()));
+                    };
+                    let array_index = usize::try_from(index).map_err(|_| {
+                        IRBuilderErr::ArrayIndexOutOfBounds {
+                            array: l_val.id.to_string(),
+                            index,
+                            length: *length,
+                        }
+                    })?;
+                    if array_index >= *length {
+                        return Err(IRBuilderErr::ArrayIndexOutOfBounds {
+                            array: l_val.id.to_string(),
+                            index,
+                            length: *length,
+                        });
+                    }
+                    offset += array_index * scalar_count(element);
+                    ty = element;
+                }
+
+                if *ty != Type::I32 {
+                    return Err(IRBuilderErr::NonConstSymbol(l_val.id.to_string()));
+                }
+                Ok(values[offset])
+            }
+            Symbol::Func(_) => Err(IRBuilderErr::InvalidLVal(l_val.id.to_string())),
         }
+    }
+}
+
+fn scalar_count(ty: &Type) -> usize {
+    match ty {
+        Type::I32 | Type::Pointer(_) => 1,
+        Type::Array(element, length) => scalar_count(element) * length,
+        Type::Void => 0,
     }
 }

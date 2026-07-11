@@ -41,6 +41,13 @@ impl IRBuilder {
         self.register_lib_funcs()?;
 
         for item in &comp_unit.items {
+            if let CompUnitItem::Decl(decl) = item {
+                self.gen_global_decl(decl)?;
+            }
+        }
+        let globals = self.context.take_output();
+
+        for item in &comp_unit.items {
             match item {
                 CompUnitItem::FuncDecl(func_decl) => self.register_func_decl(func_decl)?,
                 CompUnitItem::FuncDef(func_def) => self.register_func(func_def)?,
@@ -61,14 +68,14 @@ impl IRBuilder {
             }
         }
 
-        for item in &comp_unit.items {
-            if let CompUnitItem::Decl(decl) = item {
-                self.gen_global_decl(decl)?;
-            }
-        }
         let declarations = self.context.take_output();
         output.push_str(&declarations);
         if !declarations.is_empty() {
+            output.push('\n');
+        }
+
+        output.push_str(&globals);
+        if !globals.is_empty() {
             output.push('\n');
         }
 

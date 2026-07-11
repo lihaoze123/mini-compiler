@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use koopa::ir::{FunctionData, Value, ValueKind};
+use koopa::ir::{FunctionData, TypeKind, Value, ValueKind};
 
 use super::error::GenerateAsmError;
 
@@ -8,6 +8,12 @@ use super::error::GenerateAsmError;
 #[display("{offset}(sp)")]
 pub(super) struct StackSlot {
     offset: usize,
+}
+
+impl StackSlot {
+    pub(super) fn offset(self) -> usize {
+        self.offset
+    }
 }
 
 #[derive(Default)]
@@ -41,7 +47,7 @@ impl StackFrame {
         }
 
         for &param in func_data.params() {
-            frame.alloc_slot(param);
+            frame.alloc_slot(param, func_data.dfg().value(param).ty().size());
         }
 
         let mut max_bb_params = 0;
@@ -49,19 +55,26 @@ impl StackFrame {
             let params = func_data.dfg().bb(*bb).params();
             max_bb_params = max_bb_params.max(params.len());
             for &param in params {
-                frame.alloc_slot(param);
+                frame.alloc_slot(param, func_data.dfg().value(param).ty().size());
             }
 
             for &inst in node.insts().keys() {
                 let inst_data = func_data.dfg().value(inst);
                 match inst_data.kind() {
-                    ValueKind::Alloc(_) | ValueKind::Binary(_) | ValueKind::Load(_) => {
-                        frame.alloc_slot(inst);
+                    ValueKind::Alloc(_) => {
+                        let TypeKind::Pointer(base) = inst_data.ty().kind() else {
+                            unreachable!("alloc must produce a pointer")
+                        };
+                        frame.alloc_slot(inst, base.size());
                     }
-                    ValueKind::Call(_) => {
-                        if !inst_data.ty().is_unit() {
-                            frame.alloc_slot(inst);
-                        }
+                    ValueKind::Binary(_)
+                    | ValueKind::Load(_)
+                    | ValueKind::GetPtr(_)
+                    | ValueKind::GetElemPtr(_) => {
+                        frame.alloc_slot(inst, inst_data.ty().size());
+                    }
+                    ValueKind::Call(_) if !inst_data.ty().is_unit() => {
+                        frame.alloc_slot(inst, inst_data.ty().size());
                     }
                     _ => {}
                 }
@@ -118,13 +131,14 @@ impl StackFrame {
             .ok_or(GenerateAsmError::MissingStackSlot)
     }
 
-    fn alloc_slot(&mut self, value: Value) {
+    fn alloc_slot(&mut self, value: Value, size: usize) {
         if self.slots.contains_key(&value) {
             return;
         }
 
+        self.size = self.size.div_ceil(4) * 4;
         let slot = StackSlot { offset: self.size };
-        self.size += 4;
+        self.size += size;
         self.slots.insert(value, slot);
     }
 

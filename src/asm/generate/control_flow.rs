@@ -46,12 +46,12 @@ impl FunctionGenerator<'_, '_> {
         for (index, &arg) in args.iter().enumerate() {
             let scratch = self.frame.arg_scratch_slot(index)?;
             self.load_to(arg, "t1")?;
-            emit_instruction!(self, "sw t1, {scratch}");
+            self.emit_stack_store("t1", scratch)?;
         }
 
         for (index, &param) in params.iter().enumerate() {
             let scratch = self.frame.arg_scratch_slot(index)?;
-            emit_instruction!(self, "lw t1, {scratch}");
+            self.emit_stack_load("t1", scratch)?;
             self.store_from(param, "t1")?;
         }
 
@@ -65,7 +65,7 @@ impl FunctionGenerator<'_, '_> {
             } else {
                 let outgoing_arg = self.frame.outgoing_args_slot(index - 8)?;
                 self.load_to(arg, "t1")?;
-                emit_instruction!(self, "sw t1, {outgoing_arg}");
+                self.emit_stack_store("t1", outgoing_arg)?;
             }
         }
 

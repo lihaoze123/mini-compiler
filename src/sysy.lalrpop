@@ -66,15 +66,35 @@ FuncDecl: FuncDecl = {
   },
 };
 
-FuncDeclParams: Vec<BType> = {
-  <b_type: BType> => vec![b_type],
-  <mut params: FuncDeclParams> "," <b_type: BType> => {
-    params.push(b_type);
+FuncDeclParams: Vec<FuncDeclParamType> = {
+  <param: FuncDeclParam> => vec![param],
+  <mut params: FuncDeclParams> "," <param: FuncDeclParam> => {
+    params.push(param);
     params
   },
 };
 
-FuncFParam: FuncFParam = <b_type: BType> <id: Ident> => FuncFParam { <> };
+FuncDeclParam: FuncDeclParamType = {
+  <base: BType> <suffix: FuncParamSuffix> => match suffix {
+    Some(trailing_dimensions) => FuncDeclParamType::Array { base, trailing_dimensions },
+    None => FuncDeclParamType::Scalar(base),
+  },
+};
+
+FuncFParam: FuncFParam = {
+  <base: BType> <id: Ident> <suffix: FuncParamSuffix> => {
+    let ty = match suffix {
+      Some(trailing_dimensions) => FuncParamType::Array { base, trailing_dimensions },
+      None => FuncParamType::Scalar(base),
+    };
+    FuncFParam { ty, id }
+  },
+};
+
+FuncParamSuffix: Option<Vec<ConstExp>> = {
+  => None,
+  "[" "]" <trailing_dimensions: ArrayDimensions> => Some(trailing_dimensions),
+};
 
 FuncFParams: Vec<FuncFParam> = {
   FuncFParam => vec![<>],
@@ -108,9 +128,27 @@ ConstDefs: Vec<ConstDef> = {
 
 BType: BType = "int" => BType::Int;
 
-ConstDef: ConstDef = <id: Ident> "=" <const_init_val: ConstInitVal> => ConstDef { <> };
+ConstDef: ConstDef = {
+  <id: Ident> <dimensions: ArrayDimensions> "=" <init: ConstInitVal> => ConstDef {
+    id,
+    dimensions,
+    init,
+  },
+};
 
-ConstInitVal: ConstInitVal = <const_exp: ConstExp> => ConstInitVal { <> };
+ConstInitVal: ConstInitVal = {
+  <const_exp: ConstExp> => ConstInitVal::Exp(const_exp),
+  "{" "}" => ConstInitVal::List(Vec::new()),
+  "{" <values: ConstInitVals> "}" => ConstInitVal::List(values),
+};
+
+ConstInitVals: Vec<ConstInitVal> = {
+  <value: ConstInitVal> => vec![value],
+  <mut values: ConstInitVals> "," <value: ConstInitVal> => {
+    values.push(value);
+    values
+  },
+};
 
 VarDecl: VarDecl = <b_type: BType> <var_defs: VarDefs> ";" => VarDecl { <> };
 
@@ -123,15 +161,51 @@ VarDefs: Vec<VarDef> = {
 };
 
 VarDef: VarDef = {
-  <id: Ident> => VarDef::ID(id),
-  <id: Ident> "=" <init_val: InitVal> => VarDef::InitVal(id, init_val),
+  <id: Ident> <dimensions: ArrayDimensions> => VarDef {
+    id,
+    dimensions,
+    init: None,
+  },
+  <id: Ident> <dimensions: ArrayDimensions> "=" <init: InitVal> => VarDef {
+    id,
+    dimensions,
+    init: Some(init),
+  },
 };
 
-InitVal: InitVal = <exp: Exp> => InitVal { <> };
+InitVal: InitVal = {
+  <exp: Exp> => InitVal::Exp(exp),
+  "{" "}" => InitVal::List(Vec::new()),
+  "{" <values: InitVals> "}" => InitVal::List(values),
+};
+
+InitVals: Vec<InitVal> = {
+  <value: InitVal> => vec![value],
+  <mut values: InitVals> "," <value: InitVal> => {
+    values.push(value);
+    values
+  },
+};
+
+ArrayDimensions: Vec<ConstExp> = {
+  => Vec::new(),
+  <mut dimensions: ArrayDimensions> "[" <dimension: ConstExp> "]" => {
+    dimensions.push(dimension);
+    dimensions
+  },
+};
 
 ConstExp: ConstExp = <exp: Exp> => ConstExp { <> };
 
-LVal: LVal = <id: Ident> => LVal { <> };
+LVal: LVal = <id: Ident> <indices: Indices> => LVal { id, indices };
+
+Indices: Vec<Exp> = {
+  => Vec::new(),
+  <mut indices: Indices> "[" <index: Exp> "]" => {
+    indices.push(index);
+    indices
+  },
+};
 
 Stmt: Stmt = {
   MatchedStmt => <>,
@@ -181,7 +255,7 @@ Loop: Stmt = {
 };
 
 ForLoop: Stmt = {
-  "for" "(" <init: AssignExpr?> ";" <cond: Exp?> ";" <inc: AssignExpr?> ")" <body: MatchedStmt> => Stmt::Loop { init: init.map(Box::new), cond: cond, inc: inc.map(Box::new), body: Box::new(body) },
+  "for" "(" <init: AssignExpr?> ";" <cond: Exp?> ";" <inc: AssignExpr?> ")" <body: MatchedStmt> => Stmt::Loop { init: init.map(Box::new), cond, inc: inc.map(Box::new), body: Box::new(body) },
 };
 
 WhileLoop: Stmt = {
@@ -291,7 +365,7 @@ UnaryOp: UnaryOp = {
 Ident: Ident = r"[_a-zA-Z][_a-zA-Z0-9]*" => Ident { id: <>.to_string() };
 
 IntConst: i32 = {
-  r"[1-9][0-9]*" => i32::from_str_radix(<>, 10).unwrap(),
+  r"[1-9][0-9]*" => <>.parse::<i32>().unwrap(),
   r"0[0-7]*" => i32::from_str_radix(<>, 8).unwrap(),
   r"0[xX][0-9a-fA-F]+" => i32::from_str_radix(&<>[2..], 16).unwrap(),
 }

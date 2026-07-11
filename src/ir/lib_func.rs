@@ -16,65 +16,28 @@ decl @starttime()
 decl @stoptime()
 "#;
 
-struct LibFunc {
-    identifier: &'static str,
-    param_count: usize,
-    ret: Type,
-}
-
-const LIB_FUNC_SIGNATURES: &[LibFunc] = &[
-    LibFunc {
-        identifier: "getint",
-        param_count: 0,
-        ret: Type::I32,
-    },
-    LibFunc {
-        identifier: "getch",
-        param_count: 0,
-        ret: Type::I32,
-    },
-    LibFunc {
-        identifier: "getarray",
-        param_count: 1,
-        ret: Type::I32,
-    },
-    LibFunc {
-        identifier: "putint",
-        param_count: 1,
-        ret: Type::Void,
-    },
-    LibFunc {
-        identifier: "putch",
-        param_count: 1,
-        ret: Type::Void,
-    },
-    LibFunc {
-        identifier: "putarray",
-        param_count: 2,
-        ret: Type::Void,
-    },
-    LibFunc {
-        identifier: "starttime",
-        param_count: 0,
-        ret: Type::Void,
-    },
-    LibFunc {
-        identifier: "stoptime",
-        param_count: 0,
-        ret: Type::Void,
-    },
-];
-
 impl IRBuilder {
     pub(super) fn register_lib_funcs(&mut self) -> Result<(), IRBuilderErr> {
-        for lib_func in LIB_FUNC_SIGNATURES {
+        let i32_ptr = Type::Pointer(Box::new(Type::I32));
+        let signatures = [
+            ("getint", vec![], Type::I32),
+            ("getch", vec![], Type::I32),
+            ("getarray", vec![i32_ptr.clone()], Type::I32),
+            ("putint", vec![Type::I32], Type::Void),
+            ("putch", vec![Type::I32], Type::Void),
+            ("putarray", vec![Type::I32, i32_ptr], Type::Void),
+            ("starttime", vec![], Type::Void),
+            ("stoptime", vec![], Type::Void),
+        ];
+
+        for (identifier, params, ret) in signatures {
             let id = Ident {
-                id: lib_func.identifier.to_owned(),
+                id: identifier.to_owned(),
             };
             let func = Func {
-                identifier: lib_func.identifier.to_owned(),
-                params: vec![Type::I32; lib_func.param_count],
-                ret: lib_func.ret,
+                identifier: identifier.to_owned(),
+                params,
+                ret,
                 defined: true,
             };
             self.context.register_global_func(&id, func)?;

@@ -56,10 +56,23 @@ impl fmt::Display for VariableAddress {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub(super) enum Type {
     I32,
+    Array(Box<Type>, usize),
+    Pointer(Box<Type>),
     Void,
+}
+
+impl fmt::Display for Type {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::I32 => f.write_str("i32"),
+            Self::Array(element, length) => write!(f, "[{element}, {length}]"),
+            Self::Pointer(pointee) => write!(f, "*{pointee}"),
+            Self::Void => f.write_str("unit"),
+        }
+    }
 }
 
 impl From<BType> for Type {
@@ -105,10 +118,11 @@ impl fmt::Display for Label {
     }
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 pub(super) enum Value {
     Immediate(Immediate),
     Temporary(Temporary),
+    Address(VariableAddress),
 }
 
 impl From<i32> for Value {
@@ -129,13 +143,32 @@ impl From<Temporary> for Value {
     }
 }
 
+impl From<VariableAddress> for Value {
+    fn from(value: VariableAddress) -> Self {
+        Self::Address(value)
+    }
+}
+
 impl fmt::Display for Value {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Immediate(value) => value.fmt(f),
             Self::Temporary(value) => value.fmt(f),
+            Self::Address(value) => value.fmt(f),
         }
     }
+}
+
+#[derive(Clone)]
+pub(super) struct TypedValue {
+    pub(super) value: Value,
+    pub(super) ty: Type,
+}
+
+pub(super) struct Place {
+    pub(super) address: Value,
+    pub(super) ty: Type,
+    pub(super) mutable: bool,
 }
 
 pub(super) struct LoopFrame {
@@ -216,6 +249,7 @@ impl IRContext {
 
     pub(super) fn current_return_type(&self) -> Result<Type, IRBuilderErr> {
         self.current_return_type
+            .clone()
             .ok_or(IRBuilderErr::NoCurrentFunction)
     }
 

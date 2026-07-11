@@ -14,8 +14,17 @@ pub enum CompUnitItem {
 pub struct FuncDecl {
     pub func_type: FuncType,
     pub id: Ident,
-    pub params: Vec<BType>,
+    pub params: Vec<FuncDeclParamType>,
     pub is_extern: bool,
+}
+
+#[derive(Debug)]
+pub enum FuncDeclParamType {
+    Scalar(BType),
+    Array {
+        base: BType,
+        trailing_dimensions: Vec<ConstExp>,
+    },
 }
 
 #[derive(Debug)]
@@ -26,10 +35,18 @@ pub struct FuncDef {
     pub block: Block,
 }
 
-#[derive(Debug, derive_more::Display)]
-#[display("{id}: {b_type}")]
+#[derive(Debug)]
+pub enum FuncParamType {
+    Scalar(BType),
+    Array {
+        base: BType,
+        trailing_dimensions: Vec<ConstExp>,
+    },
+}
+
+#[derive(Debug)]
 pub struct FuncFParam {
-    pub b_type: BType,
+    pub ty: FuncParamType,
     pub id: Ident,
 }
 
@@ -103,12 +120,14 @@ pub enum BType {
 #[derive(Debug)]
 pub struct ConstDef {
     pub id: Ident,
-    pub const_init_val: ConstInitVal,
+    pub dimensions: Vec<ConstExp>,
+    pub init: ConstInitVal,
 }
 
 #[derive(Debug)]
-pub struct ConstInitVal {
-    pub const_exp: ConstExp,
+pub enum ConstInitVal {
+    Exp(ConstExp),
+    List(Vec<ConstInitVal>),
 }
 
 #[derive(Debug)]
@@ -118,14 +137,16 @@ pub struct VarDecl {
 }
 
 #[derive(Debug)]
-pub enum VarDef {
-    ID(Ident),
-    InitVal(Ident, InitVal),
+pub struct VarDef {
+    pub id: Ident,
+    pub dimensions: Vec<ConstExp>,
+    pub init: Option<InitVal>,
 }
 
 #[derive(Debug)]
-pub struct InitVal {
-    pub exp: Exp,
+pub enum InitVal {
+    Exp(Exp),
+    List(Vec<InitVal>),
 }
 
 #[derive(Debug)]
@@ -133,9 +154,10 @@ pub struct ConstExp {
     pub exp: Exp,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct LVal {
     pub id: Ident,
+    pub indices: Vec<Exp>,
 }
 
 #[derive(Debug)]

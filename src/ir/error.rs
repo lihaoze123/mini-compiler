@@ -29,6 +29,42 @@ pub enum IRBuilderErr {
     #[error("不合法的左值 {0}")]
     InvalidLVal(String),
 
+    #[error("数组长度必须为正数，实际为 {0}")]
+    InvalidArrayLength(i32),
+
+    #[error("数组大小溢出")]
+    ArraySizeOverflow,
+
+    #[error("数组 {0} 的下标过多")]
+    TooManyIndices(String),
+
+    #[error("数组 {array} 的常量下标 {index} 越界，维度长度为 {length}")]
+    ArrayIndexOutOfBounds {
+        array: String,
+        index: i32,
+        length: usize,
+    },
+
+    #[error("类型不匹配，期望 {expected}，实际为 {actual}")]
+    TypeMismatch { expected: String, actual: String },
+
+    #[error("函数 {function} 的第 {index} 个参数类型不匹配，期望 {expected}，实际为 {actual}")]
+    ArgumentTypeMismatch {
+        function: String,
+        index: usize,
+        expected: String,
+        actual: String,
+    },
+
+    #[error("{0} 不是可赋值的标量左值")]
+    ExpectedScalarLVal(String),
+
+    #[error("初始化器与目标类型 {0} 不匹配")]
+    InvalidInitializer(String),
+
+    #[error("类型 {0} 的初始化元素过多")]
+    TooManyInitializers(String),
+
     #[error("表达式无值，应该是有值")]
     ExpectedValue,
 

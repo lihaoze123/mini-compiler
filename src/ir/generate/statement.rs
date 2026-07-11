@@ -93,7 +93,7 @@ impl IRBuilder {
         emit_instruction!(self, "jump {entry_label}");
         emit_line!(self, "{entry_label}:");
 
-        let value = self.gen_value_exp(cond)?;
+        let value = Self::expect_i32(self.gen_value_exp(cond)?)?;
 
         let true_label = self.context.new_label("then");
         let end_label = self.context.new_label("end");
@@ -165,7 +165,7 @@ impl IRBuilder {
         emit_line!(self, "{cond_label}:");
 
         if let Some(cond) = cond {
-            let value = self.gen_value_exp(cond)?;
+            let value = Self::expect_i32(self.gen_value_exp(cond)?)?;
             emit_instruction!(self, "br {value}, {body_label}, {end_label}");
         } else {
             emit_instruction!(self, "jump {body_label}");
@@ -200,7 +200,7 @@ impl IRBuilder {
     fn gen_return(&mut self, ret: Option<&Exp>) -> Result<(), IRBuilderErr> {
         match (self.context.current_return_type()?, ret) {
             (Type::I32, Some(ret)) => {
-                let value = self.gen_value_exp(ret)?;
+                let value = Self::expect_i32(self.gen_value_exp(ret)?)?;
                 emit_instruction!(self, "ret {value}");
                 Ok(())
             }
@@ -210,33 +210,42 @@ impl IRBuilder {
                 emit_instruction!(self, "ret");
                 Ok(())
             }
+            (Type::Array(_, _) | Type::Pointer(_), _) => unreachable!(),
         }
     }
 
     fn gen_assign(&mut self, l_val: &LVal, exp: &Exp) -> Result<(), IRBuilderErr> {
-        match self.context.get_symbol(&l_val.id)? {
-            Symbol::Const(_) => Err(IRBuilderErr::AssignToConst(l_val.id.to_string())),
-            Symbol::Var(variable) => {
-                let value = self.gen_value_exp(exp)?;
-                emit_instruction!(self, "store {value}, {variable}");
-                Ok(())
-            }
-            Symbol::Func(_) => Err(IRBuilderErr::InvalidLVal(l_val.id.to_string())),
+        if matches!(self.context.get_symbol(&l_val.id)?, Symbol::Const(_)) {
+            return Err(IRBuilderErr::AssignToConst(l_val.id.to_string()));
         }
+        let place = self.gen_place(l_val)?;
+        if !place.mutable {
+            return Err(IRBuilderErr::AssignToConst(l_val.id.to_string()));
+        }
+        if place.ty != Type::I32 {
+            return Err(IRBuilderErr::ExpectedScalarLVal(l_val.id.to_string()));
+        }
+        let value = Self::expect_i32(self.gen_value_exp(exp)?)?;
+        emit_instruction!(self, "store {value}, {}", place.address);
+        Ok(())
     }
 
     fn gen_update(&mut self, l_val: &LVal, op: &AddOp) -> Result<(), IRBuilderErr> {
-        match self.context.get_symbol(&l_val.id)? {
-            Symbol::Const(_) => Err(IRBuilderErr::AssignToConst(l_val.id.to_string())),
-            Symbol::Var(variable) => {
-                let old_value = self.context.new_temp();
-                emit_instruction!(self, "{old_value} = load {variable}");
-
-                let new_value = self.context.emit_binary(op, old_value.into(), 1.into())?;
-                emit_instruction!(self, "store {new_value}, {variable}");
-                Ok(())
-            }
-            Symbol::Func(_) => Err(IRBuilderErr::InvalidLVal(l_val.id.to_string())),
+        if matches!(self.context.get_symbol(&l_val.id)?, Symbol::Const(_)) {
+            return Err(IRBuilderErr::AssignToConst(l_val.id.to_string()));
         }
+        let place = self.gen_place(l_val)?;
+        if !place.mutable {
+            return Err(IRBuilderErr::AssignToConst(l_val.id.to_string()));
+        }
+        if place.ty != Type::I32 {
+            return Err(IRBuilderErr::ExpectedScalarLVal(l_val.id.to_string()));
+        }
+
+        let old_value = self.context.new_temp();
+        emit_instruction!(self, "{old_value} = load {}", place.address);
+        let new_value = self.context.emit_binary(op, old_value.into(), 1.into())?;
+        emit_instruction!(self, "store {new_value}, {}", place.address);
+        Ok(())
     }
 }

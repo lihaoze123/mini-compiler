@@ -2,9 +2,14 @@ mod binary;
 mod control_flow;
 mod value;
 
-use koopa::ir::{BasicBlock, FunctionData, Program, Value, ValueKind};
+use koopa::ir::{BasicBlock, FunctionData, Program, Type, Value, ValueKind};
 
-use super::{AsmBuilder, context::AsmContext, error::GenerateAsmError, frame::StackFrame};
+use super::{
+    AsmBuilder,
+    context::AsmContext,
+    error::GenerateAsmError,
+    frame::{StackFrame, StackSlot},
+};
 
 pub(super) struct FunctionGenerator<'ctx, 'func> {
     context: &'ctx mut AsmContext,
@@ -16,6 +21,7 @@ pub(super) struct FunctionGenerator<'ctx, 'func> {
 impl AsmBuilder {
     pub fn gen_program(&mut self, program: &Program) -> Result<String, GenerateAsmError> {
         self.context.reset_generation();
+        Type::set_ptr_size(4);
 
         for &value in program.inst_layout() {
             let value_data = program.borrow_value(value);
@@ -29,18 +35,13 @@ impl AsmBuilder {
                     .as_deref()
                     .ok_or(GenerateAsmError::GlobalValueNoName)?,
             )?;
-            let initializer = program.borrow_value(alloc.init());
+            let initializer_value = alloc.init();
 
             emit_instruction!(self, ".data");
             emit_instruction!(self, ".globl {name}");
+            emit_instruction!(self, ".align 2");
             emit_line!(self, "{name}:");
-            match initializer.kind() {
-                ValueKind::Integer(integer) => {
-                    emit_instruction!(self, ".word {}", integer.value())
-                }
-                ValueKind::ZeroInit(_) => emit_instruction!(self, ".zero 4"),
-                _ => return Err(GenerateAsmError::UnsupportedGlobalInitializer),
-            }
+            self.emit_global_initializer(program, initializer_value)?;
         }
 
         for &func in program.func_layout() {
@@ -51,6 +52,31 @@ impl AsmBuilder {
         }
 
         Ok(self.context.take_output())
+    }
+
+    fn emit_global_initializer(
+        &mut self,
+        program: &Program,
+        value: Value,
+    ) -> Result<(), GenerateAsmError> {
+        let value_data = program.borrow_value(value);
+        match value_data.kind() {
+            ValueKind::Integer(integer) => {
+                emit_instruction!(self, ".word {}", integer.value());
+            }
+            ValueKind::ZeroInit(_) => {
+                emit_instruction!(self, ".zero {}", value_data.ty().size());
+            }
+            ValueKind::Aggregate(aggregate) => {
+                let elements = aggregate.elems().to_vec();
+                drop(value_data);
+                for element in elements {
+                    self.emit_global_initializer(program, element)?;
+                }
+            }
+            _ => return Err(GenerateAsmError::UnsupportedGlobalInitializer),
+        }
+        Ok(())
     }
 }
 
@@ -76,21 +102,21 @@ impl<'ctx, 'func> FunctionGenerator<'ctx, 'func> {
         emit_line!(self, "{name}:");
 
         let frame_size = self.frame.size();
-        emit_instruction!(self, "addi sp, sp, -{frame_size}");
+        self.emit_sp_adjust(-(frame_size as i64))?;
 
         if let Some(ra_slot) = self.frame.ra_slot() {
-            emit_instruction!(self, "sw ra, {ra_slot}");
+            self.emit_stack_store("ra", ra_slot)?;
         }
 
         let params = self.func_data.params().to_vec();
         for (index, param) in params.into_iter().enumerate() {
             let local_slot = self.frame.slot(param)?;
             if index < 8 {
-                emit_instruction!(self, "sw a{index}, {local_slot}");
+                self.emit_stack_store(&format!("a{index}"), local_slot)?;
             } else {
                 let incoming_slot = self.frame.incoming_arg_slot(index - 8);
-                emit_instruction!(self, "lw t0, {incoming_slot}");
-                emit_instruction!(self, "sw t0, {local_slot}");
+                self.emit_stack_load("t0", incoming_slot)?;
+                self.emit_stack_store("t0", local_slot)?;
             }
         }
 
@@ -127,7 +153,7 @@ impl<'ctx, 'func> FunctionGenerator<'ctx, 'func> {
             }
             _ => {
                 let slot = self.frame.slot(value)?;
-                emit_instruction!(self, "lw {register}, {slot}");
+                self.emit_stack_load(register, slot)?;
             }
         }
         Ok(())
@@ -135,7 +161,76 @@ impl<'ctx, 'func> FunctionGenerator<'ctx, 'func> {
 
     fn store_from(&mut self, value: Value, register: &str) -> Result<(), GenerateAsmError> {
         let slot = self.frame.slot(value)?;
-        emit_instruction!(self, "sw {register}, {slot}");
+        self.emit_stack_store(register, slot)?;
+        Ok(())
+    }
+
+    fn load_address_to(&mut self, value: Value, register: &str) -> Result<(), GenerateAsmError> {
+        if let Some(name) = self.global_name(value)? {
+            emit_instruction!(self, "la {register}, {name}");
+            return Ok(());
+        }
+
+        match self.func_data.dfg().value(value).kind() {
+            ValueKind::Alloc(_) => {
+                let slot = self.frame.slot(value)?;
+                self.emit_stack_address(register, slot)?;
+            }
+            _ => self.load_to(value, register)?,
+        }
+        Ok(())
+    }
+
+    fn emit_sp_adjust(&mut self, amount: i64) -> Result<(), GenerateAsmError> {
+        if fits_i12(amount) {
+            emit_instruction!(self, "addi sp, sp, {amount}");
+        } else {
+            emit_instruction!(self, "li t0, {amount}");
+            emit_instruction!(self, "add sp, sp, t0");
+        }
+        Ok(())
+    }
+
+    fn emit_stack_address(
+        &mut self,
+        register: &str,
+        slot: StackSlot,
+    ) -> Result<(), GenerateAsmError> {
+        let offset = slot.offset() as i64;
+        if fits_i12(offset) {
+            emit_instruction!(self, "addi {register}, sp, {offset}");
+        } else {
+            emit_instruction!(self, "li {register}, {offset}");
+            emit_instruction!(self, "add {register}, sp, {register}");
+        }
+        Ok(())
+    }
+
+    fn emit_stack_load(&mut self, register: &str, slot: StackSlot) -> Result<(), GenerateAsmError> {
+        let offset = slot.offset() as i64;
+        if fits_i12(offset) {
+            emit_instruction!(self, "lw {register}, {offset}(sp)");
+        } else {
+            let scratch = if register == "t3" { "t4" } else { "t3" };
+            self.emit_stack_address(scratch, slot)?;
+            emit_instruction!(self, "lw {register}, 0({scratch})");
+        }
+        Ok(())
+    }
+
+    fn emit_stack_store(
+        &mut self,
+        register: &str,
+        slot: StackSlot,
+    ) -> Result<(), GenerateAsmError> {
+        let offset = slot.offset() as i64;
+        if fits_i12(offset) {
+            emit_instruction!(self, "sw {register}, {offset}(sp)");
+        } else {
+            let scratch = if register == "t3" { "t4" } else { "t3" };
+            self.emit_stack_address(scratch, slot)?;
+            emit_instruction!(self, "sw {register}, 0({scratch})");
+        }
         Ok(())
     }
 
@@ -150,6 +245,10 @@ impl<'ctx, 'func> FunctionGenerator<'ctx, 'func> {
             .ok_or(GenerateAsmError::GlobalValueNoName)?;
         strip_prefix(name).map(Some)
     }
+}
+
+fn fits_i12(value: i64) -> bool {
+    (-2048..=2047).contains(&value)
 }
 
 pub(super) fn strip_prefix(name: &str) -> Result<String, GenerateAsmError> {
