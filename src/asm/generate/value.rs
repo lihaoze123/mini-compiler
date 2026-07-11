@@ -7,8 +7,12 @@ impl FunctionGenerator<'_, '_> {
         let value_data = self.func_data.dfg().value(value);
         match value_data.kind() {
             ValueKind::Return(ret) => {
-                let value = ret.value().ok_or(GenerateAsmError::Unknown)?;
-                self.load_to(value, "a0")?;
+                if let Some(value) = ret.value() {
+                    self.load_to(value, "a0")?;
+                }
+                if let Some(ra_slot) = self.frame.ra_slot() {
+                    emit_instruction!(self, "lw ra, {ra_slot}");
+                }
                 let frame_size = self.frame.size();
                 emit_instruction!(self, "addi sp, sp, {frame_size}");
                 emit_instruction!(self, "ret");
@@ -27,6 +31,7 @@ impl FunctionGenerator<'_, '_> {
             }
             ValueKind::Branch(branch) => self.gen_branch(branch)?,
             ValueKind::Jump(jump) => self.gen_jump(jump)?,
+            ValueKind::Call(call) => self.gen_call(value, call)?,
             kind => unimplemented!("{:?}", kind),
         }
 

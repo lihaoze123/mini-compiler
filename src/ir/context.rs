@@ -49,7 +49,7 @@ pub(super) struct VariableAddress {
 
 impl fmt::Display for VariableAddress {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "@{}_{}", self.identifier, self.id)
+        write!(f, "%{}_{}", self.identifier, self.id)
     }
 }
 

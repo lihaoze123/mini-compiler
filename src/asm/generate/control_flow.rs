@@ -1,4 +1,7 @@
-use koopa::ir::{BasicBlock, Value, values::Branch, values::Jump};
+use koopa::ir::{
+    BasicBlock, Value,
+    values::{Branch, Call, Jump},
+};
 
 use super::{FunctionGenerator, GenerateAsmError};
 
@@ -50,6 +53,27 @@ impl FunctionGenerator<'_, '_> {
             let scratch = self.frame.arg_scratch_slot(index)?;
             emit_instruction!(self, "lw t1, {scratch}");
             self.store_from(param, "t1")?;
+        }
+
+        Ok(())
+    }
+
+    pub(super) fn gen_call(&mut self, value: Value, call: &Call) -> Result<(), GenerateAsmError> {
+        for (index, &arg) in call.args().iter().enumerate() {
+            if index < 8 {
+                self.load_to(arg, &format!("a{index}"))?;
+            } else {
+                let outgoing_arg = self.frame.outgoing_args_slot(index - 8)?;
+                self.load_to(arg, "t1")?;
+                emit_instruction!(self, "sw t1, {outgoing_arg}");
+            }
+        }
+
+        let callee_name = Self::strip_prefix(self.program.func(call.callee()).name())?;
+        emit_instruction!(self, "call {callee_name}");
+
+        if !self.func_data.dfg().value(value).ty().is_unit() {
+            self.store_from(value, "a0")?;
         }
 
         Ok(())

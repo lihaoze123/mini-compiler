@@ -39,7 +39,7 @@
           openssl
 
           qemu
-          pkgsCross.riscv64.stdenv.cc
+          pkgsCross.riscv32.stdenv.cc
         ];
       };
     };

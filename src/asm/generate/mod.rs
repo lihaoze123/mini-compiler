@@ -8,6 +8,7 @@ use super::{AsmBuilder, context::AsmContext, error::GenerateAsmError, frame::Sta
 
 pub(super) struct FunctionGenerator<'ctx, 'func> {
     context: &'ctx mut AsmContext,
+    program: &'func Program,
     func_data: &'func FunctionData,
     frame: StackFrame,
 }
@@ -17,7 +18,10 @@ impl AsmBuilder {
         self.context.reset_generation();
 
         for &func in program.func_layout() {
-            FunctionGenerator::new(&mut self.context, program.func(func)).generate()?;
+            let func_data = program.func(func);
+            if func_data.layout().entry_bb().is_some() {
+                FunctionGenerator::new(&mut self.context, program, func_data).generate()?;
+            }
         }
 
         Ok(self.context.take_output())
@@ -25,9 +29,14 @@ impl AsmBuilder {
 }
 
 impl<'ctx, 'func> FunctionGenerator<'ctx, 'func> {
-    fn new(context: &'ctx mut AsmContext, func_data: &'func FunctionData) -> Self {
+    fn new(
+        context: &'ctx mut AsmContext,
+        program: &'func Program,
+        func_data: &'func FunctionData,
+    ) -> Self {
         Self {
             context,
+            program,
             frame: StackFrame::build(func_data),
             func_data,
         }
@@ -42,6 +51,22 @@ impl<'ctx, 'func> FunctionGenerator<'ctx, 'func> {
 
         let frame_size = self.frame.size();
         emit_instruction!(self, "addi sp, sp, -{frame_size}");
+
+        if let Some(ra_slot) = self.frame.ra_slot() {
+            emit_instruction!(self, "sw ra, {ra_slot}");
+        }
+
+        let params = self.func_data.params().to_vec();
+        for (index, param) in params.into_iter().enumerate() {
+            let local_slot = self.frame.slot(param)?;
+            if index < 8 {
+                emit_instruction!(self, "sw a{index}, {local_slot}");
+            } else {
+                let incoming_slot = self.frame.incoming_arg_slot(index - 8);
+                emit_instruction!(self, "lw t0, {incoming_slot}");
+                emit_instruction!(self, "sw t0, {local_slot}");
+            }
+        }
 
         let func_data = self.func_data;
         for (bb, node) in func_data.layout().bbs() {
@@ -65,14 +90,16 @@ impl<'ctx, 'func> FunctionGenerator<'ctx, 'func> {
     }
 
     fn basic_block_name(&self, bb: BasicBlock) -> Result<String, GenerateAsmError> {
-        Self::strip_prefix(
+        let function_name = Self::strip_prefix(self.func_data.name())?;
+        let block_name = Self::strip_prefix(
             self.func_data
                 .dfg()
                 .bb(bb)
                 .name()
                 .as_ref()
                 .ok_or(GenerateAsmError::BBNoName)?,
-        )
+        )?;
+        Ok(format!(".L_{function_name}_{block_name}"))
     }
 
     fn load_to(&mut self, value: Value, register: &str) -> Result<(), GenerateAsmError> {

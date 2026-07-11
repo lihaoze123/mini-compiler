@@ -14,12 +14,35 @@ pub(super) struct StackSlot {
 pub(super) struct StackFrame {
     size: usize,
     slots: HashMap<Value, StackSlot>,
+    ra_slot: Option<StackSlot>,
+    outgoing_args_slots: Vec<StackSlot>,
     arg_scratch_slots: Vec<StackSlot>,
 }
 
 impl StackFrame {
     pub(super) fn build(func_data: &FunctionData) -> Self {
         let mut frame = Self::default();
+
+        let mut has_call = false;
+        let mut max_call_args = 0;
+
+        for (_, node) in func_data.layout().bbs() {
+            for &inst in node.insts().keys() {
+                let inst_data = func_data.dfg().value(inst);
+                if let ValueKind::Call(call) = inst_data.kind() {
+                    has_call = true;
+                    max_call_args = max_call_args.max(call.args().len());
+                }
+            }
+        }
+
+        for _ in 8..max_call_args {
+            frame.alloc_outgoing_args_slot();
+        }
+
+        for &param in func_data.params() {
+            frame.alloc_slot(param);
+        }
 
         let mut max_bb_params = 0;
         for (bb, node) in func_data.layout().bbs() {
@@ -30,9 +53,15 @@ impl StackFrame {
             }
 
             for &inst in node.insts().keys() {
-                match func_data.dfg().value(inst).kind() {
+                let inst_data = func_data.dfg().value(inst);
+                match inst_data.kind() {
                     ValueKind::Alloc(_) | ValueKind::Binary(_) | ValueKind::Load(_) => {
                         frame.alloc_slot(inst);
+                    }
+                    ValueKind::Call(_) => {
+                        if !inst_data.ty().is_unit() {
+                            frame.alloc_slot(inst);
+                        }
                     }
                     _ => {}
                 }
@@ -43,7 +72,14 @@ impl StackFrame {
             frame.alloc_arg_scratch_slot();
         }
 
+        if has_call {
+            frame.size += 4;
+        }
         frame.size = Self::align_to_16(frame.size);
+        if has_call {
+            frame.alloc_ra_slot();
+        }
+
         frame
     }
 
@@ -56,6 +92,23 @@ impl StackFrame {
             .get(&value)
             .copied()
             .ok_or(GenerateAsmError::MissingStackSlot)
+    }
+
+    pub(super) fn ra_slot(&self) -> Option<StackSlot> {
+        self.ra_slot
+    }
+
+    pub(super) fn outgoing_args_slot(&self, index: usize) -> Result<StackSlot, GenerateAsmError> {
+        self.outgoing_args_slots
+            .get(index)
+            .copied()
+            .ok_or(GenerateAsmError::MissingStackSlot)
+    }
+
+    pub(super) fn incoming_arg_slot(&self, index: usize) -> StackSlot {
+        StackSlot {
+            offset: self.size + index * 4,
+        }
     }
 
     pub(super) fn arg_scratch_slot(&self, index: usize) -> Result<StackSlot, GenerateAsmError> {
@@ -73,6 +126,19 @@ impl StackFrame {
         let slot = StackSlot { offset: self.size };
         self.size += 4;
         self.slots.insert(value, slot);
+    }
+
+    fn alloc_ra_slot(&mut self) {
+        let slot = StackSlot {
+            offset: self.size - 4,
+        };
+        self.ra_slot = Some(slot);
+    }
+
+    fn alloc_outgoing_args_slot(&mut self) {
+        let slot = StackSlot { offset: self.size };
+        self.size += 4;
+        self.outgoing_args_slots.push(slot);
     }
 
     fn alloc_arg_scratch_slot(&mut self) {
