@@ -4,7 +4,6 @@ use super::{
     IRBuilder,
     context::{Func, Type},
     error::IRBuilderErr,
-    symbol::Symbol,
 };
 
 pub(super) const LIB_FUNCS: &str = r#"decl @getint(): i32
@@ -76,8 +75,9 @@ impl IRBuilder {
                 identifier: lib_func.identifier.to_owned(),
                 params: vec![Type::I32; lib_func.param_count],
                 ret: lib_func.ret,
+                defined: true,
             };
-            self.context.define_global_symbol(&id, Symbol::Func(func))?;
+            self.context.register_global_func(&id, func)?;
         }
 
         Ok(())

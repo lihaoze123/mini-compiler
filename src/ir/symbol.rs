@@ -30,6 +30,10 @@ impl Scope {
     pub(super) fn get(&self, id: &Ident) -> Option<&Symbol> {
         self.0.get(id)
     }
+
+    pub(super) fn get_mut(&mut self, id: &Ident) -> Option<&mut Symbol> {
+        self.0.get_mut(id)
+    }
 }
 
 #[derive(Default)]

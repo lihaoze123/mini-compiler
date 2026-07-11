@@ -17,6 +17,9 @@ pub enum IRBuilderErr {
     #[error("重复定义符号 {0}")]
     DuplicateSymbol(String),
 
+    #[error("函数 {0} 的声明与已有签名不一致")]
+    ConflictingFunctionDeclaration(String),
+
     #[error("没有作用域")]
     NoScope,
 

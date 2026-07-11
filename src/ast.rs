@@ -6,7 +6,16 @@ pub struct CompUnit {
 #[derive(Debug)]
 pub enum CompUnitItem {
     Decl(Decl),
+    FuncDecl(FuncDecl),
     FuncDef(FuncDef),
+}
+
+#[derive(Debug)]
+pub struct FuncDecl {
+    pub func_type: FuncType,
+    pub id: Ident,
+    pub params: Vec<BType>,
+    pub is_extern: bool,
 }
 
 #[derive(Debug)]

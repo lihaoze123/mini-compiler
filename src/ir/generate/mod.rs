@@ -3,7 +3,7 @@ mod expression;
 mod statement;
 
 use crate::{
-    ast::FuncDef,
+    ast::{FuncDecl, FuncDef},
     ir::{
         context::{Func, Type},
         symbol::Symbol,
@@ -27,17 +27,46 @@ impl ControlFlow {
 impl IRBuilder {
     pub(super) fn register_func(&mut self, func_def: &FuncDef) -> Result<(), IRBuilderErr> {
         let params = func_def.params.as_deref().unwrap_or_default();
-        self.context.define_global_symbol(
+        self.context.register_global_func(
             &func_def.id,
-            Symbol::Func(Func {
+            Func {
                 identifier: func_def.id.id.clone(),
                 params: params
                     .iter()
                     .map(|param| Type::from(param.b_type))
                     .collect(),
                 ret: Type::from(func_def.func_type),
-            }),
+                defined: true,
+            },
         )
+    }
+
+    pub(super) fn register_func_decl(&mut self, func_decl: &FuncDecl) -> Result<(), IRBuilderErr> {
+        self.context.register_global_func(
+            &func_decl.id,
+            Func {
+                identifier: func_decl.id.id.clone(),
+                params: func_decl.params.iter().copied().map(Type::from).collect(),
+                ret: Type::from(func_decl.func_type),
+                defined: false,
+            },
+        )
+    }
+
+    pub(super) fn gen_func_decl(&mut self, func_decl: &FuncDecl) -> Result<(), IRBuilderErr> {
+        let _ = func_decl.is_extern;
+        let params = func_decl
+            .params
+            .iter()
+            .map(ToString::to_string)
+            .collect::<Vec<_>>()
+            .join(", ");
+        let return_type = match func_decl.func_type {
+            crate::ast::FuncType::Int => ": i32",
+            crate::ast::FuncType::Void => "",
+        };
+        emit_line!(self, "decl {}({params}){return_type}", func_decl.id);
+        Ok(())
     }
 
     pub(super) fn gen_func_def(&mut self, func_def: &FuncDef) -> Result<(), IRBuilderErr> {

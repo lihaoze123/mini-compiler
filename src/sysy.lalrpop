@@ -14,17 +14,21 @@ pub CompUnit: CompUnit = {
 };
 
 CompUnitItem: CompUnitItem = {
-  <decl: Decl> => CompUnitItem::Decl(decl),
+  <decl: GlobalDecl> => CompUnitItem::Decl(decl),
+  <func_decl: FuncDecl> => CompUnitItem::FuncDecl(func_decl),
   <func_def: FuncDef> => CompUnitItem::FuncDef(func_def),
 };
 
+GlobalDecl: Decl = {
+  <const_decl: ConstDecl> => Decl::ConstDecl(const_decl),
+  "int" <var_defs: VarDefs> ";" => Decl::VarDecl(VarDecl { b_type: BType::Int, var_defs }),
+};
+
 FuncDef: FuncDef = {
-  <b_type: BType> <id: Ident> "(" <params: FuncFParams> ")" <block: Block> => {
-    let _ = b_type;
+  "int" <id: Ident> "(" <params: FuncFParams> ")" <block: Block> => {
     FuncDef { func_type: FuncType::Int, id, params: Some(params), block }
   },
-  <b_type: BType> <id: Ident> "(" ")" <block: Block> => {
-    let _ = b_type;
+  "int" <id: Ident> "(" ")" <block: Block> => {
     FuncDef { func_type: FuncType::Int, id, params: None, block }
   },
   "void" <id: Ident> "(" <params: FuncFParams> ")" <block: Block> => {
@@ -32,6 +36,41 @@ FuncDef: FuncDef = {
   },
   "void" <id: Ident> "(" ")" <block: Block> => {
     FuncDef { func_type: FuncType::Void, id, params: None, block }
+  },
+};
+
+FuncDecl: FuncDecl = {
+  "int" <id: Ident> "(" <params: FuncDeclParams?> ")" ";" => FuncDecl {
+    func_type: FuncType::Int,
+    id,
+    params: params.unwrap_or_default(),
+    is_extern: false,
+  },
+  "void" <id: Ident> "(" <params: FuncDeclParams?> ")" ";" => FuncDecl {
+    func_type: FuncType::Void,
+    id,
+    params: params.unwrap_or_default(),
+    is_extern: false,
+  },
+  "extern" "int" <id: Ident> "(" <params: FuncDeclParams?> ")" ";" => FuncDecl {
+    func_type: FuncType::Int,
+    id,
+    params: params.unwrap_or_default(),
+    is_extern: true,
+  },
+  "extern" "void" <id: Ident> "(" <params: FuncDeclParams?> ")" ";" => FuncDecl {
+    func_type: FuncType::Void,
+    id,
+    params: params.unwrap_or_default(),
+    is_extern: true,
+  },
+};
+
+FuncDeclParams: Vec<BType> = {
+  <b_type: BType> => vec![b_type],
+  <mut params: FuncDeclParams> "," <b_type: BType> => {
+    params.push(b_type);
+    params
   },
 };
 

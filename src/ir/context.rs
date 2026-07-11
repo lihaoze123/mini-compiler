@@ -84,6 +84,7 @@ pub(super) struct Func {
     pub(super) identifier: String,
     pub(super) params: Vec<Type>,
     pub(super) ret: Type,
+    pub(super) defined: bool,
 }
 
 impl fmt::Display for Func {
@@ -267,6 +268,38 @@ impl IRContext {
         symbol: Symbol,
     ) -> Result<(), IRBuilderErr> {
         self.global_symbols.define(id, symbol)
+    }
+
+    pub(super) fn register_global_func(
+        &mut self,
+        id: &Ident,
+        func: Func,
+    ) -> Result<(), IRBuilderErr> {
+        let Some(symbol) = self.global_symbols.get_mut(id) else {
+            return self.global_symbols.define(id, Symbol::Func(func));
+        };
+
+        let Symbol::Func(existing) = symbol else {
+            return Err(IRBuilderErr::DuplicateSymbol(id.to_string()));
+        };
+        if existing.params != func.params || existing.ret != func.ret {
+            return Err(IRBuilderErr::ConflictingFunctionDeclaration(id.to_string()));
+        }
+        if func.defined {
+            if existing.defined {
+                return Err(IRBuilderErr::DuplicateSymbol(id.to_string()));
+            }
+            existing.defined = true;
+        }
+        Ok(())
+    }
+
+    pub(super) fn is_function_defined(&self, id: &Ident) -> Result<bool, IRBuilderErr> {
+        match self.global_symbols.get(id) {
+            Some(Symbol::Func(func)) => Ok(func.defined),
+            Some(_) => Err(IRBuilderErr::NotAFunction(id.to_string())),
+            None => Err(IRBuilderErr::UndefinedSymbol(id.to_string())),
+        }
     }
 
     pub(super) fn push_loop(&mut self, continue_label: Label, break_label: Label) {

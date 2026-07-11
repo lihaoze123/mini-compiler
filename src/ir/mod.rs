@@ -18,6 +18,8 @@ macro_rules! emit_line {
 mod const_eval;
 mod generate;
 
+use std::collections::HashSet;
+
 use crate::ast::{CompUnit, CompUnitItem};
 use context::IRContext;
 use lib_func::LIB_FUNCS;
@@ -39,25 +41,34 @@ impl IRBuilder {
         self.register_lib_funcs()?;
 
         for item in &comp_unit.items {
-            if let CompUnitItem::FuncDef(func_def) = item {
-                self.register_func(func_def)?;
+            match item {
+                CompUnitItem::FuncDecl(func_decl) => self.register_func_decl(func_decl)?,
+                CompUnitItem::FuncDef(func_def) => self.register_func(func_def)?,
+                CompUnitItem::Decl(_) => {}
             }
         }
 
         let mut output = String::from(LIB_FUNCS);
         output.push('\n');
 
+        let mut emitted_declarations = HashSet::new();
+        for item in &comp_unit.items {
+            if let CompUnitItem::FuncDecl(func_decl) = item
+                && emitted_declarations.insert(func_decl.id.clone())
+                && !self.context.is_function_defined(&func_decl.id)?
+            {
+                self.gen_func_decl(func_decl)?;
+            }
+        }
+
         for item in &comp_unit.items {
             if let CompUnitItem::Decl(decl) = item {
                 self.gen_global_decl(decl)?;
             }
         }
-        output.push_str(&self.context.take_output());
-        if comp_unit
-            .items
-            .iter()
-            .any(|item| matches!(item, CompUnitItem::Decl(_)))
-        {
+        let declarations = self.context.take_output();
+        output.push_str(&declarations);
+        if !declarations.is_empty() {
             output.push('\n');
         }
 
