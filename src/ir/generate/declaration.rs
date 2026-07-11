@@ -48,6 +48,7 @@ impl IRBuilder {
     }
 
     fn gen_const_decl(&mut self, const_decl: &ConstDecl) -> Result<(), IRBuilderErr> {
+        let _ = const_decl.b_type;
         for def in &const_decl.const_defs {
             self.gen_const_def(&def.id, &def.const_init_val)?;
         }
@@ -62,6 +63,51 @@ impl IRBuilder {
         let value = self.eval_exp(&const_init_val.const_exp.exp)?;
         self.context
             .define_symbol(id, Symbol::Const(Immediate::from(value)))?;
+        Ok(())
+    }
+
+    pub(crate) fn gen_global_decl(&mut self, decl: &Decl) -> Result<(), IRBuilderErr> {
+        match decl {
+            Decl::ConstDecl(const_decl) => self.gen_global_const_decl(const_decl),
+            Decl::VarDecl(var_decl) => self.gen_global_var_decl(var_decl),
+        }
+    }
+
+    fn gen_global_var_decl(&mut self, var_decl: &VarDecl) -> Result<(), IRBuilderErr> {
+        for def in &var_decl.var_defs {
+            let (id, initializer) = match def {
+                VarDef::ID(id) => (id, None),
+                VarDef::InitVal(id, init_val) => (id, Some(self.eval_exp(&init_val.exp)?)),
+            };
+
+            let variable = self.context.new_global_variable(id);
+            self.context
+                .define_global_symbol(id, Symbol::Var(variable.clone()))?;
+
+            match initializer {
+                Some(value) => {
+                    emit_line!(
+                        self,
+                        "global {variable} = alloc {}, {value}",
+                        var_decl.b_type
+                    )
+                }
+                None => emit_line!(
+                    self,
+                    "global {variable} = alloc {}, zeroinit",
+                    var_decl.b_type
+                ),
+            }
+        }
+        Ok(())
+    }
+
+    fn gen_global_const_decl(&mut self, const_decl: &ConstDecl) -> Result<(), IRBuilderErr> {
+        for def in &const_decl.const_defs {
+            let value = self.eval_exp(&def.const_init_val.const_exp.exp)?;
+            self.context
+                .define_global_symbol(&def.id, Symbol::Const(Immediate::from(value)))?;
+        }
         Ok(())
     }
 }

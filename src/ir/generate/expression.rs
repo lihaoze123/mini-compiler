@@ -150,7 +150,7 @@ impl IRBuilder {
                 }
             }
             UnaryExp::FuncCall(id, args) => {
-                let func = match self.context.get_global_symbol(id)? {
+                let func = match self.context.get_symbol(id)? {
                     Symbol::Func(func) => func,
                     _ => return Err(IRBuilderErr::NotAFunction(id.to_string())),
                 };

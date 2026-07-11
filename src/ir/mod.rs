@@ -18,7 +18,7 @@ macro_rules! emit_line {
 mod const_eval;
 mod generate;
 
-use crate::ast::CompUnit;
+use crate::ast::{CompUnit, CompUnitItem};
 use context::IRContext;
 use lib_func::LIB_FUNCS;
 
@@ -27,7 +27,6 @@ pub use error::IRBuilderErr;
 #[derive(Default)]
 pub struct IRBuilder {
     context: IRContext,
-    lib_funcs_registered: bool,
 }
 
 impl IRBuilder {
@@ -36,29 +35,39 @@ impl IRBuilder {
     }
 
     pub fn gen_comp_unit(&mut self, comp_unit: &CompUnit) -> Result<String, IRBuilderErr> {
+        self.context.reset_program();
         self.register_lib_funcs()?;
+
+        for item in &comp_unit.items {
+            if let CompUnitItem::FuncDef(func_def) = item {
+                self.register_func(func_def)?;
+            }
+        }
 
         let mut output = String::from(LIB_FUNCS);
         output.push('\n');
-        self.gen_comp_unit_body(comp_unit, &mut output)?;
-        Ok(output)
-    }
 
-    fn gen_comp_unit_body(
-        &mut self,
-        comp_unit: &CompUnit,
-        output: &mut String,
-    ) -> Result<(), IRBuilderErr> {
-        match comp_unit {
-            CompUnit::FuncDef(func_def) => {
-                self.gen_function_into(func_def, output)?;
-            }
-            CompUnit::CompUnit(comp_unit, func_def) => {
-                self.gen_comp_unit_body(comp_unit, output)?;
-                self.gen_function_into(func_def, output)?;
+        for item in &comp_unit.items {
+            if let CompUnitItem::Decl(decl) = item {
+                self.gen_global_decl(decl)?;
             }
         }
-        Ok(())
+        output.push_str(&self.context.take_output());
+        if comp_unit
+            .items
+            .iter()
+            .any(|item| matches!(item, CompUnitItem::Decl(_)))
+        {
+            output.push('\n');
+        }
+
+        for item in &comp_unit.items {
+            if let CompUnitItem::FuncDef(func_def) = item {
+                self.gen_function_into(func_def, &mut output)?;
+            }
+        }
+
+        Ok(output)
     }
 
     fn gen_function_into(
@@ -66,7 +75,7 @@ impl IRBuilder {
         func_def: &crate::ast::FuncDef,
         output: &mut String,
     ) -> Result<(), IRBuilderErr> {
-        self.context.reset_generation();
+        self.context.reset_function();
         self.gen_func_def(func_def)?;
         output.push_str(&self.context.take_output());
         Ok(())

@@ -21,12 +21,22 @@ impl FunctionGenerator<'_, '_> {
             ValueKind::Alloc(_) => {}
             ValueKind::Store(store) => {
                 self.load_to(store.value(), "t0")?;
-                let destination = self.frame.slot(store.dest())?;
-                emit_instruction!(self, "sw t0, {destination}");
+                if let Some(name) = self.global_name(store.dest())? {
+                    emit_instruction!(self, "la t1, {name}");
+                    emit_instruction!(self, "sw t0, 0(t1)");
+                } else {
+                    let destination = self.frame.slot(store.dest())?;
+                    emit_instruction!(self, "sw t0, {destination}");
+                }
             }
             ValueKind::Load(load) => {
-                let source = self.frame.slot(load.src())?;
-                emit_instruction!(self, "lw t0, {source}");
+                if let Some(name) = self.global_name(load.src())? {
+                    emit_instruction!(self, "la t0, {name}");
+                    emit_instruction!(self, "lw t0, 0(t0)");
+                } else {
+                    let source = self.frame.slot(load.src())?;
+                    emit_instruction!(self, "lw t0, {source}");
+                }
                 self.store_from(value, "t0")?;
             }
             ValueKind::Branch(branch) => self.gen_branch(branch)?,

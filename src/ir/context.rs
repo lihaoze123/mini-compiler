@@ -42,14 +42,17 @@ impl fmt::Display for Temporary {
 }
 
 #[derive(Clone)]
-pub(super) struct VariableAddress {
-    identifier: String,
-    id: usize,
+pub(super) enum VariableAddress {
+    Local { identifier: String, id: usize },
+    Global { identifier: String },
 }
 
 impl fmt::Display for VariableAddress {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "%{}_{}", self.identifier, self.id)
+        match self {
+            Self::Local { identifier, id } => write!(f, "%{identifier}_{id}"),
+            Self::Global { identifier } => write!(f, "@{identifier}"),
+        }
     }
 }
 
@@ -153,7 +156,18 @@ pub(super) struct IRContext {
 }
 
 impl IRContext {
-    pub(super) fn reset_generation(&mut self) {
+    pub(super) fn reset_program(&mut self) {
+        self.output.clear();
+        self.temp_id = 0;
+        self.label_id = 0;
+        self.var_id = 0;
+        self.symbols.clear();
+        self.loops.clear();
+        self.global_symbols = Scope::default();
+        self.current_return_type = None;
+    }
+
+    pub(super) fn reset_function(&mut self) {
         self.output.clear();
         self.temp_id = 0;
         self.symbols.clear();
@@ -181,12 +195,18 @@ impl IRContext {
     }
 
     pub(super) fn new_variable(&mut self, id: &Ident) -> VariableAddress {
-        let variable = VariableAddress {
+        let variable = VariableAddress::Local {
             identifier: id.id.clone(),
             id: self.var_id,
         };
         self.var_id += 1;
         variable
+    }
+
+    pub(super) fn new_global_variable(&self, id: &Ident) -> VariableAddress {
+        VariableAddress::Global {
+            identifier: id.id.clone(),
+        }
     }
 
     pub(super) fn set_current_return_type(&mut self, return_type: Option<Type>) {
@@ -235,7 +255,10 @@ impl IRContext {
     }
 
     pub(super) fn get_symbol(&self, id: &Ident) -> Result<Symbol, IRBuilderErr> {
-        self.symbols.get(id)
+        self.symbols
+            .find(id)
+            .or_else(|| self.global_symbols.get(id).cloned())
+            .ok_or_else(|| IRBuilderErr::UndefinedSymbol(id.to_string()))
     }
 
     pub(super) fn define_global_symbol(
@@ -244,13 +267,6 @@ impl IRContext {
         symbol: Symbol,
     ) -> Result<(), IRBuilderErr> {
         self.global_symbols.define(id, symbol)
-    }
-
-    pub(super) fn get_global_symbol(&self, id: &Ident) -> Result<Symbol, IRBuilderErr> {
-        self.global_symbols
-            .get(id)
-            .cloned()
-            .ok_or(IRBuilderErr::UndefinedSymbol(id.to_string()))
     }
 
     pub(super) fn push_loop(&mut self, continue_label: Label, break_label: Label) {

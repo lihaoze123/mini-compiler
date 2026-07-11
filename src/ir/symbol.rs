@@ -55,12 +55,11 @@ impl ScopeStack {
         scope.define(id, symbol)
     }
 
-    pub(super) fn get(&self, id: &Ident) -> Result<Symbol, IRBuilderErr> {
+    pub(super) fn find(&self, id: &Ident) -> Option<Symbol> {
         self.scopes
             .iter()
             .rev()
             .find_map(|scope| scope.get(id).cloned())
-            .ok_or_else(|| IRBuilderErr::UndefinedSymbol(id.to_string()))
     }
 }
 

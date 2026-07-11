@@ -10,22 +10,29 @@ match {
 }
 
 pub CompUnit: CompUnit = {
-  <func_def: FuncDef> => CompUnit::FuncDef(func_def),
-  <comp_unit: CompUnit> <func_def: FuncDef> => CompUnit::CompUnit(Box::new(comp_unit), func_def),
+  <items: CompUnitItem+> => CompUnit { items },
+};
+
+CompUnitItem: CompUnitItem = {
+  <decl: Decl> => CompUnitItem::Decl(decl),
+  <func_def: FuncDef> => CompUnitItem::FuncDef(func_def),
 };
 
 FuncDef: FuncDef = {
-  <func_type: FuncType> <id: Ident> "(" <params: FuncFParams> ")" <block: Block> => {
-    FuncDef { func_type, id, params: Some(params), block }
+  <b_type: BType> <id: Ident> "(" <params: FuncFParams> ")" <block: Block> => {
+    let _ = b_type;
+    FuncDef { func_type: FuncType::Int, id, params: Some(params), block }
   },
-  <func_type: FuncType> <id: Ident> "(" ")" <block: Block> => {
-    FuncDef { func_type, id, params: None, block }
+  <b_type: BType> <id: Ident> "(" ")" <block: Block> => {
+    let _ = b_type;
+    FuncDef { func_type: FuncType::Int, id, params: None, block }
   },
-};
-
-FuncType: FuncType = {
-  "int" => FuncType::Int,
-  "void" => FuncType::Void,
+  "void" <id: Ident> "(" <params: FuncFParams> ")" <block: Block> => {
+    FuncDef { func_type: FuncType::Void, id, params: Some(params), block }
+  },
+  "void" <id: Ident> "(" ")" <block: Block> => {
+    FuncDef { func_type: FuncType::Void, id, params: None, block }
+  },
 };
 
 FuncFParam: FuncFParam = <b_type: BType> <id: Ident> => FuncFParam { <> };

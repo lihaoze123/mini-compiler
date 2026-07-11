@@ -25,10 +25,8 @@ impl ControlFlow {
 }
 
 impl IRBuilder {
-    pub(super) fn gen_func_def(&mut self, func_def: &FuncDef) -> Result<(), IRBuilderErr> {
+    pub(super) fn register_func(&mut self, func_def: &FuncDef) -> Result<(), IRBuilderErr> {
         let params = func_def.params.as_deref().unwrap_or_default();
-        let return_type = Type::from(func_def.func_type);
-
         self.context.define_global_symbol(
             &func_def.id,
             Symbol::Func(Func {
@@ -37,9 +35,14 @@ impl IRBuilder {
                     .iter()
                     .map(|param| Type::from(param.b_type))
                     .collect(),
-                ret: return_type,
+                ret: Type::from(func_def.func_type),
             }),
-        )?;
+        )
+    }
+
+    pub(super) fn gen_func_def(&mut self, func_def: &FuncDef) -> Result<(), IRBuilderErr> {
+        let params = func_def.params.as_deref().unwrap_or_default();
+        let return_type = Type::from(func_def.func_type);
 
         self.context.enter_scope();
         self.context.set_current_return_type(Some(return_type));

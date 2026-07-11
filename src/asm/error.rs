@@ -17,6 +17,12 @@ pub enum GenerateAsmError {
     #[error("基本块无名称")]
     BBNoName,
 
+    #[error("全局变量无名称")]
+    GlobalValueNoName,
+
+    #[error("不支持的全局变量初始化器")]
+    UnsupportedGlobalInitializer,
+
     #[error("未知错误")]
     Unknown,
 }

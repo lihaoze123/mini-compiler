@@ -3,7 +3,7 @@ use koopa::ir::{
     values::{Branch, Call, Jump},
 };
 
-use super::{FunctionGenerator, GenerateAsmError};
+use super::{FunctionGenerator, GenerateAsmError, strip_prefix};
 
 impl FunctionGenerator<'_, '_> {
     pub(super) fn gen_branch(&mut self, branch: &Branch) -> Result<(), GenerateAsmError> {
@@ -69,7 +69,7 @@ impl FunctionGenerator<'_, '_> {
             }
         }
 
-        let callee_name = Self::strip_prefix(self.program.func(call.callee()).name())?;
+        let callee_name = strip_prefix(self.program.func(call.callee()).name())?;
         emit_instruction!(self, "call {callee_name}");
 
         if !self.func_data.dfg().value(value).ty().is_unit() {

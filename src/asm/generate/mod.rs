@@ -17,6 +17,32 @@ impl AsmBuilder {
     pub fn gen_program(&mut self, program: &Program) -> Result<String, GenerateAsmError> {
         self.context.reset_generation();
 
+        for &value in program.inst_layout() {
+            let value_data = program.borrow_value(value);
+            let alloc = match value_data.kind() {
+                ValueKind::GlobalAlloc(alloc) => alloc,
+                _ => return Err(GenerateAsmError::UnsupportedGlobalInitializer),
+            };
+            let name = strip_prefix(
+                value_data
+                    .name()
+                    .as_deref()
+                    .ok_or(GenerateAsmError::GlobalValueNoName)?,
+            )?;
+            let initializer = program.borrow_value(alloc.init());
+
+            emit_instruction!(self, ".data");
+            emit_instruction!(self, ".globl {name}");
+            emit_line!(self, "{name}:");
+            match initializer.kind() {
+                ValueKind::Integer(integer) => {
+                    emit_instruction!(self, ".word {}", integer.value())
+                }
+                ValueKind::ZeroInit(_) => emit_instruction!(self, ".zero 4"),
+                _ => return Err(GenerateAsmError::UnsupportedGlobalInitializer),
+            }
+        }
+
         for &func in program.func_layout() {
             let func_data = program.func(func);
             if func_data.layout().entry_bb().is_some() {
@@ -43,7 +69,7 @@ impl<'ctx, 'func> FunctionGenerator<'ctx, 'func> {
     }
 
     fn generate(mut self) -> Result<(), GenerateAsmError> {
-        let name = Self::strip_prefix(self.func_data.name())?;
+        let name = strip_prefix(self.func_data.name())?;
 
         emit_instruction!(self, ".text");
         emit_instruction!(self, ".globl {name}");
@@ -81,17 +107,9 @@ impl<'ctx, 'func> FunctionGenerator<'ctx, 'func> {
         Ok(())
     }
 
-    fn strip_prefix(name: &str) -> Result<String, GenerateAsmError> {
-        let name = match &name[0..1] {
-            prefix @ ("@" | "%") => name.strip_prefix(prefix).ok_or(GenerateAsmError::Parse)?,
-            _ => return Err(GenerateAsmError::Parse),
-        };
-        Ok(name.to_owned())
-    }
-
     fn basic_block_name(&self, bb: BasicBlock) -> Result<String, GenerateAsmError> {
-        let function_name = Self::strip_prefix(self.func_data.name())?;
-        let block_name = Self::strip_prefix(
+        let function_name = strip_prefix(self.func_data.name())?;
+        let block_name = strip_prefix(
             self.func_data
                 .dfg()
                 .bb(bb)
@@ -120,4 +138,26 @@ impl<'ctx, 'func> FunctionGenerator<'ctx, 'func> {
         emit_instruction!(self, "sw {register}, {slot}");
         Ok(())
     }
+
+    fn global_name(&self, value: Value) -> Result<Option<String>, GenerateAsmError> {
+        let values = self.program.borrow_values();
+        let Some(value_data) = values.get(&value) else {
+            return Ok(None);
+        };
+        let name = value_data
+            .name()
+            .as_deref()
+            .ok_or(GenerateAsmError::GlobalValueNoName)?;
+        strip_prefix(name).map(Some)
+    }
+}
+
+pub(super) fn strip_prefix(name: &str) -> Result<String, GenerateAsmError> {
+    let Some(prefix) = name.chars().next() else {
+        return Err(GenerateAsmError::Parse);
+    };
+    if !matches!(prefix, '@' | '%') {
+        return Err(GenerateAsmError::Parse);
+    }
+    Ok(name[1..].to_owned())
 }

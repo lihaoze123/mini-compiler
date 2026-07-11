@@ -68,10 +68,6 @@ const LIB_FUNC_SIGNATURES: &[LibFunc] = &[
 
 impl IRBuilder {
     pub(super) fn register_lib_funcs(&mut self) -> Result<(), IRBuilderErr> {
-        if self.lib_funcs_registered {
-            return Ok(());
-        }
-
         for lib_func in LIB_FUNC_SIGNATURES {
             let id = Ident {
                 id: lib_func.identifier.to_owned(),
@@ -84,7 +80,6 @@ impl IRBuilder {
             self.context.define_global_symbol(&id, Symbol::Func(func))?;
         }
 
-        self.lib_funcs_registered = true;
         Ok(())
     }
 }

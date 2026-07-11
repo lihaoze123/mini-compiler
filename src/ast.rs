@@ -1,7 +1,12 @@
 #[derive(Debug)]
-pub enum CompUnit {
+pub struct CompUnit {
+    pub items: Vec<CompUnitItem>,
+}
+
+#[derive(Debug)]
+pub enum CompUnitItem {
+    Decl(Decl),
     FuncDef(FuncDef),
-    CompUnit(Box<CompUnit>, FuncDef),
 }
 
 #[derive(Debug)]
