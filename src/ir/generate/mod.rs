@@ -89,9 +89,10 @@ impl IRBuilder {
 
         let mut param_variables = Vec::new();
 
-        for param in params {
+        for (index, param) in params.iter().enumerate() {
             let param_type = self.lower_func_param_type(&param.ty)?;
             let variable = self.context.new_variable(&param.id);
+            let parameter_name = format!("%arg_{index}");
             self.context.define_symbol(
                 &param.id,
                 Symbol::Object(Object {
@@ -101,15 +102,16 @@ impl IRBuilder {
                     const_values: None,
                 }),
             )?;
-            param_variables.push((param, variable, param_type));
+            param_variables.push((param, variable, param_type, parameter_name));
         }
 
         let result = (|| {
             let params = params
                 .iter()
-                .map(|param| {
+                .enumerate()
+                .map(|(index, param)| {
                     self.lower_func_param_type(&param.ty)
-                        .map(|ty| format!("{}: {ty}", param.id))
+                        .map(|ty| format!("%arg_{index}: {ty}"))
                 })
                 .collect::<Result<Vec<_>, _>>()?
                 .join(", ");
@@ -122,9 +124,9 @@ impl IRBuilder {
             emit_line!(self, "fun {}({params}){return_suffix} {{", func_def.id);
             emit_line!(self, "%entry:");
 
-            for (param, variable, param_type) in param_variables {
+            for (_param, variable, param_type, parameter_name) in param_variables {
                 emit_instruction!(self, "{variable} = alloc {param_type}");
-                emit_instruction!(self, "store {}, {variable}", param.id);
+                emit_instruction!(self, "store {parameter_name}, {variable}");
             }
 
             let flow = self.gen_block(&func_def.block)?;

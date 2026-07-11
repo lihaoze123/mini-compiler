@@ -76,20 +76,15 @@ fn fill_initializer<'a>(
                 match value {
                     InitNode::Expr(exp) => output.push(Some(*exp)),
                     InitNode::List(_) => {
-                        let remainder = used % element_count;
-                        if remainder != 0 {
-                            output.resize(output.len() + element_count - remainder, None);
+                        let (target_type, target_count) =
+                            aligned_subobject(element, used, total_count - used);
+                        let target_start = output.len();
+                        fill_initializer(target_type, value, output)?;
+                        let initialized = output.len() - target_start;
+                        if initialized > target_count {
+                            return Err(IRBuilderErr::TooManyInitializers(target_type.to_string()));
                         }
-                        if output.len() - start >= total_count {
-                            return Err(IRBuilderErr::TooManyInitializers(ty.to_string()));
-                        }
-                        let element_start = output.len();
-                        fill_initializer(element, value, output)?;
-                        let initialized = output.len() - element_start;
-                        if initialized > element_count {
-                            return Err(IRBuilderErr::TooManyInitializers(element.to_string()));
-                        }
-                        output.resize(element_start + element_count, None);
+                        output.resize(target_start + target_count, None);
                     }
                 }
             }
@@ -99,6 +94,19 @@ fn fill_initializer<'a>(
         Type::Void => return Err(IRBuilderErr::InvalidInitializer(ty.to_string())),
     }
     Ok(())
+}
+
+fn aligned_subobject(mut ty: &Type, initialized: usize, remaining: usize) -> (&Type, usize) {
+    loop {
+        let count = scalar_count(ty);
+        if initialized.is_multiple_of(count) && count <= remaining {
+            return (ty, count);
+        }
+        let Type::Array(element, _) = ty else {
+            return (ty, count);
+        };
+        ty = element;
+    }
 }
 
 pub(super) fn format_aggregate(ty: &Type, values: &[i32]) -> String {

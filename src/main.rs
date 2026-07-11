@@ -212,7 +212,7 @@ mod tests {
         let ir = generate_ir(source).expect("failed to generate array IR");
 
         assert!(ir.contains("global @matrix = alloc [[i32, 3], 2], {{1, 2, 0}, {3, 0, 0}}"));
-        assert!(ir.contains("fun @get(@values: *[i32, 3]"));
+        assert!(ir.contains("fun @get(%arg_0: *[i32, 3]"));
         assert!(ir.contains(" = getptr "));
         assert!(ir.contains(" = getelemptr "));
         assert!(ir.contains("call @get("));
@@ -255,6 +255,34 @@ mod tests {
             error,
             crate::ir::IRBuilderErr::ArgumentTypeMismatch { .. }
         ));
+    }
+
+    #[test]
+    fn aligns_nested_initializers_to_the_current_subarray() {
+        let source = r#"
+            int values[2][3][4] = {1, 2, 3, 4, {5}, {}};
+            int main() { return values[0][1][0]; }
+        "#;
+        let ir = generate_ir(source).expect("nested initializer alignment should be supported");
+
+        assert!(ir.contains("{{{1, 2, 3, 4}, {5, 0, 0, 0}, {0, 0, 0, 0}}"));
+        crate::asm::str_to_program(&ir).expect("aligned initializer should produce valid Koopa");
+    }
+
+    #[test]
+    fn function_parameters_do_not_collide_with_globals() {
+        let source = r#"
+            int n;
+            int first(int values[], int n) { return values[n]; }
+            int main() {
+                int values[1] = {7};
+                return first(values, n);
+            }
+        "#;
+        let ir = generate_ir(source).expect("global and parameter names may be identical");
+
+        assert!(ir.contains("fun @first(%arg_0: *i32, %arg_1: i32)"));
+        crate::asm::str_to_program(&ir).expect("parameter names should resolve locally");
     }
 
     #[test]
